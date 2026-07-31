@@ -91,7 +91,7 @@ async function getAvailableKonteynerlerForSofor(soforId, pagination = {}) {
 }
 
 async function createToplamaKaydi(soforId, data) {
-  const { konteyner_id, durum, sebep, diger_aciklama } = data;
+  const { konteyner_id, durum, sebep, diger_aciklama, idempotency_key } = data;
 
   const checkResult = await pool.query(
     `
@@ -157,9 +157,12 @@ async function createToplamaKaydi(soforId, data) {
   const result = await pool.query(
     `
     INSERT INTO toplama_kayitlari
-      (konteyner_id, sofor_id, durum, sebep, diger_aciklama)
+      (konteyner_id, sofor_id, durum, sebep, diger_aciklama, idempotency_key)
     VALUES
-      ($1, $2, $3, $4, $5)
+      ($1, $2, $3, $4, $5, $6)
+    ON CONFLICT (sofor_id, idempotency_key)
+      WHERE idempotency_key IS NOT NULL
+    DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
     RETURNING
       id,
       konteyner_id,
@@ -177,6 +180,7 @@ async function createToplamaKaydi(soforId, data) {
       durum,
       durum === "atlanildi" ? sebep : null,
       durum === "atlanildi" ? diger_aciklama || null : null,
+      idempotency_key || null,
     ]
   );
 

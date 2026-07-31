@@ -98,7 +98,7 @@ async function createSikayet(data, files = []) {
     const fotograflar = [];
 
     for (const file of files) {
-      const fotoUrl = `/uploads/sikayetler/${file.filename}`;
+      const fotoUrl = file.storageUrl || `/uploads/sikayetler/${file.filename}`;
 
       const fotoResult = await client.query(
         `

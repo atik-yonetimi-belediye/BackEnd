@@ -6,10 +6,7 @@ const authMiddleware = require("../../middlewares/authMiddleware");
 
 const router = express.Router();
 
-router.post("/admin/login", validateBody(schemas.adminLogin), authController.loginAdmin);
-router.post("/cavus/login", validateBody(schemas.phoneLogin), authController.loginCavus);
-router.post("/sofor/login", validateBody(schemas.phoneLogin), authController.loginSofor);
-router.post("/sirket/login", validateBody(schemas.sirketLogin), authController.loginSirket);
+router.post("/login", validateBody(schemas.login), authController.login);
 router.post(
   "/sirket/register",
   validateBody(schemas.sirketRegister),

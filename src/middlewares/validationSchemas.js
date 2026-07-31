@@ -91,18 +91,12 @@ const paginationShape = {
 const paginationQuery = z.object(paginationShape);
 
 const auth = {
-  adminLogin: z.object({
-    kullanici_adi: trimmedString(2, 50, "Kullanıcı adı"),
-    sifre: loginPassword,
-  }),
-  phoneLogin: z.object({
-    telefon: phone,
-    sifre: loginPassword,
-  }),
-  sirketLogin: z.object({
-    mail: email,
-    sifre: loginPassword,
-  }),
+  login: z
+    .object({
+      identifier: trimmedString(2, 100, "Telefon numarası veya kullanıcı adı"),
+      sifre: loginPassword,
+    })
+    .strict(),
   sirketRegister: z.object({
     ad: trimmedString(2, 150, "Şirket adı"),
     adres: optionalString(1000),

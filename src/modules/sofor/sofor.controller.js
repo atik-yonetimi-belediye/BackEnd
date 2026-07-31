@@ -37,6 +37,11 @@ async function getAvailableKonteynerlerForSofor(req, res) {
 async function createToplamaKaydi(req, res) {
   try {
     const { konteyner_id, durum, sebep, diger_aciklama } = req.body;
+    const idempotencyKey = req.get("Idempotency-Key") || null;
+
+    if (idempotencyKey && !/^[A-Za-z0-9-]{20,64}$/.test(idempotencyKey)) {
+      return errorResponse(res, "Geçersiz tekrar gönderim anahtarı.", 400);
+    }
 
     if (!konteyner_id || !durum) {
       return errorResponse(res, "Konteyner id ve durum zorunludur.", 400);
@@ -67,6 +72,7 @@ async function createToplamaKaydi(req, res) {
       durum,
       sebep,
       diger_aciklama,
+      idempotency_key: idempotencyKey,
     });
 
     return successResponse(res, "Toplama kaydı başarıyla oluşturuldu.", data, 201);

@@ -1,7 +1,9 @@
 require("dotenv").config({ quiet: true });
 
-const app = require("./app");
 const runMigrations = require("./scripts/migrateDatabase");
+const pool = require("./config/db");
+const { connectRedis, closeRedis } = require("./config/redis");
+const logger = require("./utils/logger");
 
 const PORT = process.env.PORT || 5000;
 
@@ -21,14 +23,38 @@ if (
 }
 
 async function startServer() {
+  await connectRedis();
+  const app = require("./app");
   await runMigrations();
-
-  app.listen(PORT, () => {
-    console.log(`Sunucu ${PORT} portunda çalışıyor.`);
+  const server = app.listen(PORT, () => {
+    logger.info("server_started", { port: Number(PORT) });
   });
+
+  let shuttingDown = false;
+  const shutdown = async (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info("server_shutdown_started", { signal });
+    const forceTimer = setTimeout(() => process.exit(1), 15000);
+    forceTimer.unref();
+    server.close(async (error) => {
+      try {
+        if (error) logger.error("http_server_close_error", { error });
+        await Promise.allSettled([pool.end(), closeRedis()]);
+        clearTimeout(forceTimer);
+        logger.info("server_shutdown_complete", { signal });
+        process.exit(error ? 1 : 0);
+      } catch (closeError) {
+        logger.error("server_shutdown_failed", { error: closeError });
+        process.exit(1);
+      }
+    });
+  };
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.once("SIGINT", () => shutdown("SIGINT"));
 }
 
 startServer().catch((error) => {
-  console.error("Sunucu başlatılamadı:", error);
+  logger.error("server_start_failed", { error });
   process.exit(1);
 });

@@ -10,65 +10,12 @@ function createSessionResponse(res, message, data) {
   return successResponse(res, message, { user: data.user });
 }
 
-async function loginAdmin(req, res) {
+async function login(req, res) {
   try {
-    const { kullanici_adi, sifre } = req.body;
+    const { identifier, sifre } = req.body;
+    const data = await authService.login(identifier, sifre);
 
-    if (!kullanici_adi || !sifre) {
-      return errorResponse(res, "Kullanıcı adı ve şifre zorunludur.", 400);
-    }
-
-    const data = await authService.loginAdmin(kullanici_adi, sifre);
-
-    return createSessionResponse(res, "Yönetici girişi başarılı.", data);
-  } catch (error) {
-    return errorResponse(res, error.message, error.statusCode || 500);
-  }
-}
-
-async function loginCavus(req, res) {
-  try {
-    const { telefon, sifre } = req.body;
-
-    if (!telefon || !sifre) {
-      return errorResponse(res, "Telefon ve şifre zorunludur.", 400);
-    }
-
-    const data = await authService.loginCavus(telefon, sifre);
-
-    return createSessionResponse(res, "Çavuş girişi başarılı.", data);
-  } catch (error) {
-    return errorResponse(res, error.message, error.statusCode || 500);
-  }
-}
-
-async function loginSofor(req, res) {
-  try {
-    const { telefon, sifre } = req.body;
-
-    if (!telefon || !sifre) {
-      return errorResponse(res, "Telefon ve şifre zorunludur.", 400);
-    }
-
-    const data = await authService.loginSofor(telefon, sifre);
-
-    return createSessionResponse(res, "Şoför girişi başarılı.", data);
-  } catch (error) {
-    return errorResponse(res, error.message, error.statusCode || 500);
-  }
-}
-
-async function loginSirket(req, res) {
-  try {
-    const { mail, sifre } = req.body;
-
-    if (!mail || !sifre) {
-      return errorResponse(res, "Mail ve şifre zorunludur.", 400);
-    }
-
-    const data = await authService.loginSirket(mail, sifre);
-
-    return createSessionResponse(res, "Şirket girişi başarılı.", data);
+    return createSessionResponse(res, "Giriş başarılı.", data);
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
@@ -123,10 +70,7 @@ async function logout(req, res) {
 }
 
 module.exports = {
-  loginAdmin,
-  loginCavus,
-  loginSofor,
-  loginSirket,
+  login,
   registerSirket,
   getSession,
   logout,

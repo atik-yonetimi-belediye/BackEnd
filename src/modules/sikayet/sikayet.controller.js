@@ -1,5 +1,6 @@
 const sikayetService = require("./sikayet.service");
 const { successResponse, errorResponse } = require("../../utils/response");
+const { storeComplaintFiles, deleteRemotePhotoUrls } = require("../../services/objectStorage");
 
 const allowedAtikTurleri = ["kati_atik", "geri_donusum"];
 
@@ -50,19 +51,24 @@ async function createSikayet(req, res) {
       return errorResponse(res, "Geçersiz şikayet kategorisi.", 400);
     }
 
-    const files = req.files || [];
-
-    const data = await sikayetService.createSikayet(
-      {
-        vatandas_ad_soyad,
-        vatandas_telefon,
-        konteyner_id,
-        sikayet_turu,
-        sikayet_kategorisi,
-        sikayet_metni,
-      },
-      files
-    );
+    const files = await storeComplaintFiles(req.files || []);
+    let data;
+    try {
+      data = await sikayetService.createSikayet(
+        {
+          vatandas_ad_soyad,
+          vatandas_telefon,
+          konteyner_id,
+          sikayet_turu,
+          sikayet_kategorisi,
+          sikayet_metni,
+        },
+        files
+      );
+    } catch (error) {
+      await deleteRemotePhotoUrls(files.map((file) => file.storageUrl));
+      throw error;
+    }
     req.uploadsPersisted = true;
 
     return successResponse(res, "Şikayet başarıyla oluşturuldu.", data, 201);

@@ -1,5 +1,6 @@
 const multer = require("multer");
 const { cleanupUploadedFiles } = require("../utils/uploadFiles");
+const logger = require("../utils/logger");
 
 async function errorMiddleware(err, req, res, next) {
   if (res.headersSent) {
@@ -32,13 +33,14 @@ async function errorMiddleware(err, req, res, next) {
       : operationalMessage;
 
   if (statusCode >= 500) {
-    console.error("Sunucu hatası:", err);
+    logger.error("request_failed", { request_id: req.id, method: req.method, path: req.originalUrl?.split("?")[0], error: err });
   }
 
   return res.status(statusCode).json({
     success: false,
     message,
     errors: err.errors || null,
+    request_id: req.id,
   });
 }
 

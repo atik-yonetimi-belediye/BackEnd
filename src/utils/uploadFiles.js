@@ -40,12 +40,15 @@ function photoUrlToFilePath(photoUrl) {
 }
 
 async function deleteStoredPhotoUrls(photoUrls = []) {
-  await Promise.allSettled(
-    photoUrls
+  const remoteUrls = photoUrls.filter((url) => /^https?:\/\//i.test(url));
+  const { deleteRemotePhotoUrls } = require("../services/objectStorage");
+  await Promise.allSettled([
+    deleteRemotePhotoUrls(remoteUrls),
+    ...photoUrls
       .map(photoUrlToFilePath)
       .filter(Boolean)
-      .map((filePath) => unlinkIfSafe(filePath))
-  );
+      .map((filePath) => unlinkIfSafe(filePath)),
+  ]);
 }
 
 function detectImageType(buffer) {
