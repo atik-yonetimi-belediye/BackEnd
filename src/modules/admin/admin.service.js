@@ -1,4 +1,10 @@
 const pool = require("../../config/db");
+const AppError = require("../../utils/AppError");
+const { canTransition } = require("../../utils/stateTransitions");
+const {
+  getPagination,
+  toPaginatedResult,
+} = require("../../utils/pagination");
 
 async function getDashboard() {
   const [
@@ -10,6 +16,7 @@ async function getDashboard() {
     sikayetResult,
     geriDonusumTalepResult,
     bugunkuToplamaResult,
+    recentActivityResult,
   ] = await Promise.all([
     pool.query(`
       SELECT
@@ -66,6 +73,7 @@ async function getDashboard() {
         COUNT(*) FILTER (WHERE durum = 'cozuldu') AS cozulen_sikayet,
         COUNT(*) FILTER (WHERE durum = 'reddedildi') AS reddedilen_sikayet
       FROM sikayetler
+      WHERE aktif_mi = true
     `),
 
     pool.query(`
@@ -85,7 +93,58 @@ async function getDashboard() {
         COUNT(*) FILTER (WHERE durum = 'toplandi') AS bugun_toplanan,
         COUNT(*) FILTER (WHERE durum = 'atlanildi') AS bugun_atlanilan
       FROM toplama_kayitlari
-      WHERE tarih_saat::date = CURRENT_DATE
+      WHERE (tarih_saat AT TIME ZONE 'Europe/Istanbul')::date =
+            (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Istanbul')::date
+    `),
+
+    pool.query(`
+      SELECT *
+      FROM (
+        SELECT
+          'collection'::text AS type,
+          tk.id,
+          tk.tarih_saat AS event_time,
+          CONCAT(
+            COALESCE(s.ad || ' ' || s.soyad, 'Bilinmeyen şoför'),
+            ' — ',
+            COALESCE(k.konteyner_kodu, 'Silinmiş konteyner'),
+            ' kaydı: ',
+            tk.durum
+          ) AS description
+        FROM toplama_kayitlari tk
+        LEFT JOIN soforler s ON s.id = tk.sofor_id
+        LEFT JOIN konteynerler k ON k.id = tk.konteyner_id
+
+        UNION ALL
+
+        SELECT
+          'complaint'::text,
+          s.id,
+          s.tarih_saat,
+          CONCAT(
+            COALESCE(k.konteyner_kodu, 'Konteyner'),
+            ' için yeni şikâyet: ',
+            s.sikayet_kategorisi
+          )
+        FROM sikayetler s
+        LEFT JOIN konteynerler k ON k.id = s.konteyner_id
+        WHERE s.aktif_mi = true
+
+        UNION ALL
+
+        SELECT
+          'recycling'::text,
+          g.id,
+          g.tarih_saat,
+          CONCAT(
+            COALESCE(g.talep_basligi, 'Geri dönüşüm talebi'),
+            ' — ',
+            g.durum
+          )
+        FROM geri_donusum_talepleri g
+      ) activities
+      ORDER BY event_time DESC
+      LIMIT 10
     `),
   ]);
 
@@ -98,10 +157,12 @@ async function getDashboard() {
     sikayetler: sikayetResult.rows[0],
     geri_donusum_talepleri: geriDonusumTalepResult.rows[0],
     bugunku_toplama: bugunkuToplamaResult.rows[0],
+    recent_activities: recentActivityResult.rows,
   };
 }
 
-async function getAllCavuslar() {
+async function getAllCavuslar(pagination = {}) {
+  const { page, limit, offset } = getPagination(pagination);
   const result = await pool.query(`
     SELECT
       c.id,
@@ -111,16 +172,19 @@ async function getAllCavuslar() {
       c.mahalle_id,
       m.ad AS mahalle_ad,
       c.created_at,
-      c.updated_at
+      c.updated_at,
+      COUNT(*) OVER() AS total_count
     FROM cavuslar c
     LEFT JOIN mahalleler m ON m.id = c.mahalle_id
     ORDER BY c.id ASC
-  `);
+    LIMIT $1 OFFSET $2
+  `, [limit, offset]);
 
-  return result.rows;
+  return toPaginatedResult(result.rows, page, limit);
 }
 
-async function getAllSoforler() {
+async function getAllSoforler(pagination = {}) {
+  const { page, limit, offset } = getPagination(pagination);
   const result = await pool.query(`
     SELECT
       s.id,
@@ -136,19 +200,22 @@ async function getAllSoforler() {
       c.ad_soyad AS cavus_ad_soyad,
       m.ad AS mahalle_ad,
       s.created_at,
-      s.updated_at
+      s.updated_at,
+      COUNT(*) OVER() AS total_count
     FROM soforler s
     LEFT JOIN araclar a ON a.id = s.arac_id
     LEFT JOIN cavuslar c ON c.id = a.cavus_id
     LEFT JOIN mahalleler m ON m.id = c.mahalle_id
     ORDER BY s.id ASC
-  `);
+    LIMIT $1 OFFSET $2
+  `, [limit, offset]);
 
-  return result.rows;
+  return toPaginatedResult(result.rows, page, limit);
 }
 
 async function getAllSirketler(filters = {}) {
   const { onay_durumu, aktif_mi } = filters;
+  const { page, limit, offset } = getPagination(filters);
 
   const values = [];
   const conditions = [];
@@ -177,44 +244,69 @@ async function getAllSirketler(filters = {}) {
       s.onay_durumu,
       s.aktif_mi,
       s.created_at,
-      s.updated_at
+      s.updated_at,
+      COUNT(*) OVER() AS total_count
     FROM sirketler s
     ${whereClause}
     ORDER BY s.id ASC
+    LIMIT $${values.length + 1} OFFSET $${values.length + 2}
     `,
-    values
+    [...values, limit, offset]
   );
 
-  return result.rows;
+  return toPaginatedResult(result.rows, page, limit);
 }
 
 async function updateSirketOnayDurumu(id, data) {
   const { onay_durumu } = data;
+  const client = await pool.connect();
 
-  const result = await pool.query(
-    `
-    UPDATE sirketler
-    SET onay_durumu = $1
-    WHERE id = $2
-    RETURNING
-      id,
-      ad,
-      adres,
-      mail,
-      telefon,
-      onay_durumu,
-      aktif_mi,
-      created_at,
-      updated_at
-    `,
-    [onay_durumu, id]
-  );
+  try {
+    await client.query("BEGIN");
+    const currentResult = await client.query(
+      "SELECT onay_durumu FROM sirketler WHERE id = $1 FOR UPDATE",
+      [id]
+    );
 
-  return result.rows[0];
+    if (currentResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return undefined;
+    }
+
+    const currentStatus = currentResult.rows[0].onay_durumu;
+    if (!canTransition("sirket", currentStatus, onay_durumu)) {
+      throw new AppError(
+        `${currentStatus} durumundan ${onay_durumu} durumuna geçilemez.`,
+        409
+      );
+    }
+
+    const result = await client.query(
+      `
+      UPDATE sirketler
+      SET onay_durumu = $1,
+          aktif_mi = CASE WHEN $1 = 'pasif' THEN false ELSE true END
+      WHERE id = $2
+      RETURNING
+        id, ad, adres, mail, telefon, onay_durumu,
+        aktif_mi, created_at, updated_at
+      `,
+      [onay_durumu, id]
+    );
+
+    await client.query("COMMIT");
+    return result.rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function getAllKonteynerler(filters = {}) {
   const { tur, mahalle_id, aktif_mi } = filters;
+  const { page, limit, offset } = getPagination(filters);
 
   const values = [];
   const conditions = [];
@@ -251,21 +343,24 @@ async function getAllKonteynerler(filters = {}) {
       k.cavus_id,
       c.ad_soyad AS cavus_ad_soyad,
       k.created_at,
-      k.updated_at
+      k.updated_at,
+      COUNT(*) OVER() AS total_count
     FROM konteynerler k
     LEFT JOIN mahalleler m ON m.id = k.mahalle_id
     LEFT JOIN cavuslar c ON c.id = k.cavus_id
     ${whereClause}
     ORDER BY k.id ASC
+    LIMIT $${values.length + 1} OFFSET $${values.length + 2}
     `,
-    values
+    [...values, limit, offset]
   );
 
-  return result.rows;
+  return toPaginatedResult(result.rows, page, limit);
 }
 
 async function getAllAraclar(filters = {}) {
   const { arac_turu, cavus_id, aktif_mi } = filters;
+  const { page, limit, offset } = getPagination(filters);
 
   const values = [];
   const conditions = [];
@@ -299,22 +394,25 @@ async function getAllAraclar(filters = {}) {
       c.ad_soyad AS cavus_ad_soyad,
       m.ad AS mahalle_ad,
       a.created_at,
-      a.updated_at
+      a.updated_at,
+      COUNT(*) OVER() AS total_count
     FROM araclar a
     LEFT JOIN cavuslar c ON c.id = a.cavus_id
     LEFT JOIN mahalleler m ON m.id = c.mahalle_id
     ${whereClause}
     ORDER BY a.id ASC
+    LIMIT $${values.length + 1} OFFSET $${values.length + 2}
     `,
-    values
+    [...values, limit, offset]
   );
 
-  return result.rows;
+  return toPaginatedResult(result.rows, page, limit);
 }
 
 async function getAllToplamaKayitlari(filters = {}) {
   const { durum, sofor_id, konteyner_id, mahalle_id, date_from, date_to } =
     filters;
+  const { page, limit, offset } = getPagination(filters);
 
   const values = [];
   const conditions = [];
@@ -341,12 +439,16 @@ async function getAllToplamaKayitlari(filters = {}) {
 
   if (date_from) {
     values.push(date_from);
-    conditions.push(`tk.tarih_saat::date >= $${values.length}`);
+    conditions.push(
+      `(tk.tarih_saat AT TIME ZONE 'Europe/Istanbul')::date >= $${values.length}`
+    );
   }
 
   if (date_to) {
     values.push(date_to);
-    conditions.push(`tk.tarih_saat::date <= $${values.length}`);
+    conditions.push(
+      `(tk.tarih_saat AT TIME ZONE 'Europe/Istanbul')::date <= $${values.length}`
+    );
   }
 
   const whereClause =
@@ -369,7 +471,8 @@ async function getAllToplamaKayitlari(filters = {}) {
       tk.diger_aciklama,
       tk.tarih_saat,
       tk.created_at,
-      tk.updated_at
+      tk.updated_at,
+      COUNT(*) OVER() AS total_count
     FROM toplama_kayitlari tk
     LEFT JOIN konteynerler k ON k.id = tk.konteyner_id
     LEFT JOIN mahalleler m ON m.id = k.mahalle_id
@@ -377,11 +480,12 @@ async function getAllToplamaKayitlari(filters = {}) {
     LEFT JOIN araclar a ON a.id = s.arac_id
     ${whereClause}
     ORDER BY tk.tarih_saat DESC
+    LIMIT $${values.length + 1} OFFSET $${values.length + 2}
     `,
-    values
+    [...values, limit, offset]
   );
 
-  return result.rows;
+  return toPaginatedResult(result.rows, page, limit);
 }
 
 module.exports = {

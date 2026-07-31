@@ -13,7 +13,7 @@ const allowedGonderenTipleri = ["vatandas", "yonetici", "sirket"];
 
 async function getAllGeriDonusumTalepleri(req, res) {
   try {
-    const { durum, gonderen_tipi, sirket_id, konteyner_id } = req.query;
+    const { durum, gonderen_tipi } = req.query;
 
     if (durum && !allowedTalepDurumlari.includes(durum)) {
       return errorResponse(res, "Geçersiz talep durumu.", 400);
@@ -23,14 +23,7 @@ async function getAllGeriDonusumTalepleri(req, res) {
       return errorResponse(res, "Geçersiz gönderen tipi.", 400);
     }
 
-    const filters = {};
-
-    if (durum) filters.durum = durum;
-    if (gonderen_tipi) filters.gonderen_tipi = gonderen_tipi;
-    if (sirket_id) filters.sirket_id = sirket_id;
-    if (konteyner_id) filters.konteyner_id = konteyner_id;
-
-    const data = await recyclingService.getAllGeriDonusumTalepleri(filters);
+    const data = await recyclingService.getAllGeriDonusumTalepleri(req.query);
 
     return successResponse(res, "Geri dönüşüm talepleri listelendi.", data);
   } catch (error) {

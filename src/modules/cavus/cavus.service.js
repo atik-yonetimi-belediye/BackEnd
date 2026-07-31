@@ -1,6 +1,12 @@
 const bcrypt = require("bcrypt");
 const pool = require("../../config/db");
+const crypto = require("crypto");
 const { normalizePhone } = require("../../utils/phone");
+const AppError = require("../../utils/AppError");
+const {
+  getPagination,
+  toPaginatedResult,
+} = require("../../utils/pagination");
 
 async function getMe(cavusId) {
   const result = await pool.query(
@@ -26,7 +32,8 @@ async function getMe(cavusId) {
   return result.rows[0];
 }
 
-async function getMyKonteynerler(cavusId) {
+async function getMyKonteynerler(cavusId, pagination = {}) {
+  const { page, limit, offset } = getPagination(pagination);
   const result = await pool.query(
     `
     SELECT
@@ -41,20 +48,25 @@ async function getMyKonteynerler(cavusId) {
       k.aktif_mi,
       k.created_at,
       k.updated_at,
+      COUNT(*) OVER() AS total_count,
       (SELECT MAX(tarih_saat) FROM toplama_kayitlari tk WHERE tk.konteyner_id = k.id AND tk.durum = 'toplandi') as son_toplanma_tarihi
     FROM konteynerler k
     JOIN mahalleler m ON m.id = k.mahalle_id
     WHERE k.cavus_id = $1
     ORDER BY k.id ASC
+    LIMIT $2 OFFSET $3
     `,
-    [cavusId]
+    [cavusId, limit, offset]
   );
 
-  return result.rows;
+  return toPaginatedResult(result.rows, page, limit);
 }
 
 async function createKonteyner(cavusId, cavusMahalleId, data) {
   const { konteyner_kodu, tur, latitude, longitude } = data;
+  const konteynerKodu =
+    konteyner_kodu ||
+    `KNT-${crypto.randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase()}`;
 
   const result = await pool.query(
     `
@@ -74,7 +86,7 @@ async function createKonteyner(cavusId, cavusMahalleId, data) {
       created_at,
       updated_at
     `,
-    [konteyner_kodu, tur, cavusMahalleId, cavusId, latitude, longitude]
+    [konteynerKodu, tur, cavusMahalleId, cavusId, latitude, longitude]
   );
 
   return result.rows[0];
@@ -104,7 +116,8 @@ async function passiveKonteyner(cavusId, konteynerId) {
   return result.rows[0];
 }
 
-async function getMyAraclar(cavusId) {
+async function getMyAraclar(cavusId, pagination = {}) {
+  const { page, limit, offset } = getPagination(pagination);
   const result = await pool.query(
     `
     SELECT
@@ -114,15 +127,17 @@ async function getMyAraclar(cavusId) {
       cavus_id,
       aktif_mi,
       created_at,
-      updated_at
+      updated_at,
+      COUNT(*) OVER() AS total_count
     FROM araclar
     WHERE cavus_id = $1
     ORDER BY id ASC
+    LIMIT $2 OFFSET $3
     `,
-    [cavusId]
+    [cavusId, limit, offset]
   );
 
-  return result.rows;
+  return toPaginatedResult(result.rows, page, limit);
 }
 
 async function createArac(cavusId, data) {
@@ -170,7 +185,8 @@ async function passiveArac(cavusId, aracId) {
   return result.rows[0];
 }
 
-async function getMySoforler(cavusId) {
+async function getMySoforler(cavusId, pagination = {}) {
+  const { page, limit, offset } = getPagination(pagination);
   const result = await pool.query(
     `
     SELECT
@@ -184,16 +200,18 @@ async function getMySoforler(cavusId) {
       s.cavus_id,
       s.aktif_mi,
       s.created_at,
-      s.updated_at
+      s.updated_at,
+      COUNT(*) OVER() AS total_count
     FROM soforler s
     LEFT JOIN araclar a ON a.id = s.arac_id
     WHERE s.cavus_id = $1
     ORDER BY s.id ASC
+    LIMIT $2 OFFSET $3
     `,
-    [cavusId]
+    [cavusId, limit, offset]
   );
 
-  return result.rows;
+  return toPaginatedResult(result.rows, page, limit);
 }
 
 async function createSofor(cavusId, data) {
@@ -265,7 +283,8 @@ async function passiveSofor(cavusId, soforId) {
   return result.rows[0];
 }
 
-async function getMyToplamaKayitlari(cavusId) {
+async function getMyToplamaKayitlari(cavusId, pagination = {}) {
+  const { page, limit, offset } = getPagination(pagination);
   const result = await pool.query(
     `
     SELECT
@@ -278,16 +297,18 @@ async function getMyToplamaKayitlari(cavusId) {
       tk.durum,
       tk.sebep,
       tk.diger_aciklama,
-      tk.tarih_saat
+      tk.tarih_saat,
+      COUNT(*) OVER() AS total_count
     FROM toplama_kayitlari tk
     JOIN konteynerler k ON k.id = tk.konteyner_id
     LEFT JOIN soforler s ON s.id = tk.sofor_id
     WHERE k.cavus_id = $1
     ORDER BY tk.tarih_saat DESC
+    LIMIT $2 OFFSET $3
     `,
-    [cavusId]
+    [cavusId, limit, offset]
   );
-  return result.rows;
+  return toPaginatedResult(result.rows, page, limit);
 }
 
 async function updateArac(cavusId, aracId, data) {
@@ -307,17 +328,73 @@ async function updateArac(cavusId, aracId, data) {
 }
 
 async function updateSoforArac(cavusId, soforId, aracId) {
-  const result = await pool.query(
-    `
-    UPDATE soforler
-    SET arac_id = $1,
-        updated_at = CURRENT_TIMESTAMP
-    WHERE id = $2 AND cavus_id = $3
-    RETURNING id, ad, soyad, telefon, arac_id, cavus_id, aktif_mi, updated_at
-    `,
-    [aracId, soforId, cavusId]
-  );
-  return result.rows[0];
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const soforResult = await client.query(
+      `
+      SELECT id
+      FROM soforler
+      WHERE id = $1 AND cavus_id = $2 AND aktif_mi = true
+      FOR UPDATE
+      `,
+      [soforId, cavusId]
+    );
+
+    if (soforResult.rowCount === 0) {
+      throw new AppError("Şoför bulunamadı veya bu çavuşa ait değil.", 404);
+    }
+
+    const aracResult = await client.query(
+      `
+      SELECT id
+      FROM araclar
+      WHERE id = $1 AND cavus_id = $2 AND aktif_mi = true
+      FOR UPDATE
+      `,
+      [aracId, cavusId]
+    );
+
+    if (aracResult.rowCount === 0) {
+      throw new AppError(
+        "Hedef araç aktif değil veya bu çavuşa ait değil.",
+        400
+      );
+    }
+
+    const assignmentResult = await client.query(
+      `
+      SELECT id
+      FROM soforler
+      WHERE arac_id = $1 AND id <> $2
+      `,
+      [aracId, soforId]
+    );
+
+    if (assignmentResult.rowCount > 0) {
+      throw new AppError("Hedef araç başka bir şoföre atanmış.", 409);
+    }
+
+    const result = await client.query(
+      `
+      UPDATE soforler
+      SET arac_id = $1
+      WHERE id = $2 AND cavus_id = $3
+      RETURNING id, ad, soyad, telefon, arac_id, cavus_id, aktif_mi, updated_at
+      `,
+      [aracId, soforId, cavusId]
+    );
+
+    await client.query("COMMIT");
+    return result.rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 module.exports = {
@@ -334,4 +411,4 @@ module.exports = {
   updateSoforArac,
   passiveSofor,
   getMyToplamaKayitlari,
-};
+};

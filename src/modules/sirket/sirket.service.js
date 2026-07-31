@@ -1,4 +1,9 @@
 const pool = require("../../config/db");
+const AppError = require("../../utils/AppError");
+const {
+  getPagination,
+  toPaginatedResult,
+} = require("../../utils/pagination");
 
 async function getMe(sirketId) {
   const result = await pool.query(
@@ -136,7 +141,7 @@ async function createGeriDonusumTalebi(sirketId, data) {
       sirket.telefon,
       talep_basligi || null,
       talep_aciklamasi || null,
-      tahmini_miktar || null,
+      tahmini_miktar ?? null,
       adres || null,
     ]
   );
@@ -144,7 +149,8 @@ async function createGeriDonusumTalebi(sirketId, data) {
   return result.rows[0];
 }
 
-async function getMyGeriDonusumTalepleri(sirketId) {
+async function getMyGeriDonusumTalepleri(sirketId, pagination = {}) {
+  const { page, limit, offset } = getPagination(pagination);
   const result = await pool.query(
     `
     SELECT
@@ -165,35 +171,98 @@ async function getMyGeriDonusumTalepleri(sirketId) {
       gdt.durum,
       gdt.yonetici_notu,
       gdt.created_at,
-      gdt.updated_at
+      gdt.updated_at,
+      COUNT(*) OVER() AS total_count
     FROM geri_donusum_talepleri gdt
     LEFT JOIN konteynerler k ON k.id = gdt.konteyner_id
     LEFT JOIN mahalleler m ON m.id = k.mahalle_id
     WHERE gdt.sirket_id = $1
     ORDER BY gdt.tarih_saat DESC
+    LIMIT $2 OFFSET $3
     `,
-    [sirketId]
+    [sirketId, limit, offset]
   );
 
-  return result.rows;
+  return toPaginatedResult(result.rows, page, limit);
 }
 
 async function updateGeriDonusumTalebi(sirketId, talepId, data) {
-  const { talep_basligi, talep_aciklamasi, tahmini_miktar, adres } = data;
-  const result = await pool.query(
-    `
-    UPDATE geri_donusum_talepleri
-    SET talep_basligi = COALESCE($1, talep_basligi),
-        talep_aciklamasi = COALESCE($2, talep_aciklamasi),
-        tahmini_miktar = COALESCE($3, tahmini_miktar),
-        adres = COALESCE($4, adres),
-        updated_at = CURRENT_TIMESTAMP
-    WHERE id = $5 AND sirket_id = $6 AND durum = 'bekliyor'
-    RETURNING *
-    `,
-    [talep_basligi, talep_aciklamasi, tahmini_miktar, adres, talepId, sirketId]
-  );
-  return result.rows[0];
+  const allowedFields = [
+    "talep_basligi",
+    "talep_aciklamasi",
+    "tahmini_miktar",
+    "adres",
+  ];
+  const entries = allowedFields
+    .filter((field) => Object.prototype.hasOwnProperty.call(data, field))
+    .map((field) => [field, data[field]]);
+
+  if (entries.length === 0) return undefined;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const currentResult = await client.query(
+      `
+      SELECT talep_basligi, talep_aciklamasi
+      FROM geri_donusum_talepleri
+      WHERE id = $1 AND sirket_id = $2 AND durum = 'bekliyor'
+      FOR UPDATE
+      `,
+      [talepId, sirketId]
+    );
+
+    if (currentResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return undefined;
+    }
+
+    const current = currentResult.rows[0];
+    const nextTitle = Object.prototype.hasOwnProperty.call(
+      data,
+      "talep_basligi"
+    )
+      ? data.talep_basligi
+      : current.talep_basligi;
+    const nextDescription = Object.prototype.hasOwnProperty.call(
+      data,
+      "talep_aciklamasi"
+    )
+      ? data.talep_aciklamasi
+      : current.talep_aciklamasi;
+
+    if (!nextTitle && !nextDescription) {
+      throw new AppError(
+        "Talep başlığı veya açıklamasından en az biri korunmalıdır.",
+        400
+      );
+    }
+
+    const values = entries.map(([, value]) => value);
+    const setClause = entries
+      .map(([field], index) => `${field} = $${index + 1}`)
+      .join(", ");
+
+    values.push(talepId, sirketId);
+    const result = await client.query(
+      `
+      UPDATE geri_donusum_talepleri
+      SET ${setClause}
+      WHERE id = $${values.length - 1}
+        AND sirket_id = $${values.length}
+        AND durum = 'bekliyor'
+      RETURNING *
+      `,
+      values
+    );
+    await client.query("COMMIT");
+    return result.rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function cancelGeriDonusumTalebi(sirketId, talepId) {

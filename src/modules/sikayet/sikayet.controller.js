@@ -21,9 +21,6 @@ const allowedSikayetDurumlari = [
 
 async function createSikayet(req, res) {
   try {
-    console.log("REQ BODY:", req.body);
-    console.log("REQ FILES:", req.files);
-
     const vatandas_ad_soyad = req.body.vatandas_ad_soyad?.trim();
     const vatandas_telefon = req.body.vatandas_telefon?.trim();
     const konteyner_id = req.body.konteyner_id;
@@ -66,6 +63,7 @@ async function createSikayet(req, res) {
       },
       files
     );
+    req.uploadsPersisted = true;
 
     return successResponse(res, "Şikayet başarıyla oluşturuldu.", data, 201);
   } catch (error) {
@@ -75,27 +73,7 @@ async function createSikayet(req, res) {
 
 async function getAllSikayetler(req, res) {
   try {
-    const { durum, sikayet_turu, sikayet_kategorisi, konteyner_id } = req.query;
-
-    const filters = {};
-
-    if (durum) {
-      filters.durum = durum;
-    }
-
-    if (sikayet_turu) {
-      filters.sikayet_turu = sikayet_turu;
-    }
-
-    if (sikayet_kategorisi) {
-      filters.sikayet_kategorisi = sikayet_kategorisi;
-    }
-
-    if (konteyner_id) {
-      filters.konteyner_id = konteyner_id;
-    }
-
-    const data = await sikayetService.getAllSikayetler(filters);
+    const data = await sikayetService.getAllSikayetler(req.query);
 
     return successResponse(res, "Şikayetler başarıyla listelendi.", data);
   } catch (error) {
@@ -152,7 +130,7 @@ async function deleteSikayet(req, res) {
     const { id } = req.params;
     const data = await sikayetService.deleteSikayet(id);
     if (!data) return errorResponse(res, "Şikayet bulunamadı.", 404);
-    return successResponse(res, "Şikayet silindi.", data);
+    return successResponse(res, "Şikayet arşivlendi.", data);
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }

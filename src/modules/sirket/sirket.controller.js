@@ -49,7 +49,10 @@ async function createGeriDonusumTalebi(req, res) {
 
 async function getMyGeriDonusumTalepleri(req, res) {
   try {
-    const data = await sirketService.getMyGeriDonusumTalepleri(req.user.id);
+    const data = await sirketService.getMyGeriDonusumTalepleri(
+      req.user.id,
+      req.query
+    );
 
     return successResponse(
       res,

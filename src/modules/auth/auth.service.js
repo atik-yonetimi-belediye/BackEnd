@@ -3,8 +3,19 @@ const pool = require("../../config/db");
 const { generateToken } = require("../../utils/jwt");
 const { normalizePhone } = require("../../utils/phone");
 
+const DUMMY_PASSWORD_HASH =
+  "$2b$12$c2WZvTqKV8d58y7XeV/8BOo8n9Zd6XDg.tfyHpEQ4ANZduJ/hDt3y";
+
 async function checkPassword(inputPassword, hashedPassword) {
   return bcrypt.compare(inputPassword, hashedPassword);
+}
+
+function createAuthError() {
+  const error = new Error(
+    "Giriş bilgileri geçersiz veya hesap kullanıma açık değil."
+  );
+  error.statusCode = 401;
+  return error;
 }
 
 async function loginAdmin(kullanici_adi, sifre) {
@@ -17,26 +28,14 @@ async function loginAdmin(kullanici_adi, sifre) {
     [kullanici_adi]
   );
 
-  if (result.rows.length === 0) {
-    const error = new Error("Yönetici bulunamadı.");
-    error.statusCode = 401;
-    throw error;
-  }
-
   const admin = result.rows[0];
+  const passwordMatch = await checkPassword(
+    sifre,
+    admin?.sifre || DUMMY_PASSWORD_HASH
+  );
 
-  if (!admin.aktif_mi) {
-    const error = new Error("Yönetici hesabı pasif durumda.");
-    error.statusCode = 403;
-    throw error;
-  }
-
-  const passwordMatch = await checkPassword(sifre, admin.sifre);
-
-  if (!passwordMatch) {
-    const error = new Error("Şifre hatalı.");
-    error.statusCode = 401;
-    throw error;
+  if (!admin || !admin.aktif_mi || !passwordMatch) {
+    throw createAuthError();
   }
 
   const token = generateToken({
@@ -80,26 +79,14 @@ async function loginCavus(telefon, sifre) {
     [normalizedPhone]
   );
 
-  if (result.rows.length === 0) {
-    const error = new Error("Çavuş bulunamadı.");
-    error.statusCode = 401;
-    throw error;
-  }
-
   const cavus = result.rows[0];
+  const passwordMatch = await checkPassword(
+    sifre,
+    cavus?.sifre || DUMMY_PASSWORD_HASH
+  );
 
-  if (!cavus.aktif_mi) {
-    const error = new Error("Çavuş hesabı pasif durumda.");
-    error.statusCode = 403;
-    throw error;
-  }
-
-  const passwordMatch = await checkPassword(sifre, cavus.sifre);
-
-  if (!passwordMatch) {
-    const error = new Error("Şifre hatalı.");
-    error.statusCode = 401;
-    throw error;
+  if (!cavus || !cavus.aktif_mi || !passwordMatch) {
+    throw createAuthError();
   }
 
   const token = generateToken({
@@ -148,38 +135,20 @@ async function loginSofor(telefon, sifre) {
     [normalizedPhone]
   );
 
-  if (result.rows.length === 0) {
-    const error = new Error("Şoför bulunamadı.");
-    error.statusCode = 401;
-    throw error;
-  }
-
   const sofor = result.rows[0];
+  const passwordMatch = await checkPassword(
+    sifre,
+    sofor?.sifre || DUMMY_PASSWORD_HASH
+  );
 
-  if (!sofor.aktif_mi) {
-    const error = new Error("Şoför hesabı pasif durumda.");
-    error.statusCode = 403;
-    throw error;
-  }
-
-  if (!sofor.arac_id) {
-    const error = new Error("Şoföre atanmış araç bulunmuyor.");
-    error.statusCode = 403;
-    throw error;
-  }
-
-  if (!sofor.arac_aktif_mi) {
-    const error = new Error("Şoföre atanmış araç pasif durumda.");
-    error.statusCode = 403;
-    throw error;
-  }
-
-  const passwordMatch = await checkPassword(sifre, sofor.sifre);
-
-  if (!passwordMatch) {
-    const error = new Error("Şifre hatalı.");
-    error.statusCode = 401;
-    throw error;
+  if (
+    !sofor ||
+    !sofor.aktif_mi ||
+    !sofor.arac_id ||
+    !sofor.arac_aktif_mi ||
+    !passwordMatch
+  ) {
+    throw createAuthError();
   }
 
   const token = generateToken({
@@ -212,37 +181,24 @@ async function loginSirket(mail, sifre) {
     `
     SELECT id, ad, adres, mail, telefon, sifre, onay_durumu, aktif_mi
     FROM sirketler
-    WHERE mail = $1
+    WHERE LOWER(mail) = LOWER($1)
     `,
     [mail]
   );
 
-  if (result.rows.length === 0) {
-    const error = new Error("Şirket bulunamadı.");
-    error.statusCode = 401;
-    throw error;
-  }
-
   const sirket = result.rows[0];
+  const passwordMatch = await checkPassword(
+    sifre,
+    sirket?.sifre || DUMMY_PASSWORD_HASH
+  );
 
-  if (!sirket.aktif_mi) {
-    const error = new Error("Şirket hesabı pasif durumda.");
-    error.statusCode = 403;
-    throw error;
-  }
-
-  if (sirket.onay_durumu !== "onaylandi") {
-    const error = new Error("Şirket hesabı henüz onaylanmamış.");
-    error.statusCode = 403;
-    throw error;
-  }
-
-  const passwordMatch = await checkPassword(sifre, sirket.sifre);
-
-  if (!passwordMatch) {
-    const error = new Error("Şifre hatalı.");
-    error.statusCode = 401;
-    throw error;
+  if (
+    !sirket ||
+    !sirket.aktif_mi ||
+    sirket.onay_durumu !== "onaylandi" ||
+    !passwordMatch
+  ) {
+    throw createAuthError();
   }
 
   const token = generateToken({
@@ -279,7 +235,7 @@ async function registerSirket(data) {
       ($1, $2, $3, $4, $5, 'bekliyor', true)
     RETURNING id, ad, adres, mail, telefon, onay_durumu, aktif_mi, created_at
     `,
-    [ad, adres || null, mail, normalizedPhone, hashedPassword]
+    [ad, adres || null, mail.toLowerCase(), normalizedPhone, hashedPassword]
   );
 
   return result.rows[0];

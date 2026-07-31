@@ -4,7 +4,10 @@ const pool = require('../config/db');
 
 async function seed() {
   try {
-    const sqlPath = path.join(__dirname, '../../../veritabani/belediye-AtikYonetimi-veritabani.sql');
+    const sqlPath = path.join(
+      __dirname,
+      "../../../Database/belediye-AtikYonetimi-veritabani.sql"
+    );
     const sql = fs.readFileSync(sqlPath, 'utf-8');
     
     console.log("Veritabanı sıfırlanıyor ve UTF-8 Türkçe tohum verileri yükleniyor...");

@@ -20,7 +20,8 @@ async function getMe(req, res) {
 async function getAvailableKonteynerlerForSofor(req, res) {
   try {
     const data = await soforService.getAvailableKonteynerlerForSofor(
-      req.user.id
+      req.user.id,
+      req.query
     );
 
     return successResponse(
@@ -76,7 +77,10 @@ async function createToplamaKaydi(req, res) {
 
 async function getMyToplamaKayitlari(req, res) {
   try {
-    const data = await soforService.getMyToplamaKayitlari(req.user.id);
+    const data = await soforService.getMyToplamaKayitlari(
+      req.user.id,
+      req.query
+    );
 
     return successResponse(res, "Şoför toplama geçmişi listelendi.", data);
   } catch (error) {

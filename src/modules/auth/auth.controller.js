@@ -1,5 +1,14 @@
 const authService = require("./auth.service");
 const { successResponse, errorResponse } = require("../../utils/response");
+const {
+  setAuthCookies,
+  clearAuthCookies,
+} = require("../../utils/authCookies");
+
+function createSessionResponse(res, message, data) {
+  setAuthCookies(res, data.token);
+  return successResponse(res, message, { user: data.user });
+}
 
 async function loginAdmin(req, res) {
   try {
@@ -11,7 +20,7 @@ async function loginAdmin(req, res) {
 
     const data = await authService.loginAdmin(kullanici_adi, sifre);
 
-    return successResponse(res, "Yönetici girişi başarılı.", data);
+    return createSessionResponse(res, "Yönetici girişi başarılı.", data);
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
@@ -27,7 +36,7 @@ async function loginCavus(req, res) {
 
     const data = await authService.loginCavus(telefon, sifre);
 
-    return successResponse(res, "Çavuş girişi başarılı.", data);
+    return createSessionResponse(res, "Çavuş girişi başarılı.", data);
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
@@ -43,7 +52,7 @@ async function loginSofor(req, res) {
 
     const data = await authService.loginSofor(telefon, sifre);
 
-    return successResponse(res, "Şoför girişi başarılı.", data);
+    return createSessionResponse(res, "Şoför girişi başarılı.", data);
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
@@ -59,7 +68,7 @@ async function loginSirket(req, res) {
 
     const data = await authService.loginSirket(mail, sifre);
 
-    return successResponse(res, "Şirket girişi başarılı.", data);
+    return createSessionResponse(res, "Şirket girişi başarılı.", data);
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
@@ -104,10 +113,21 @@ async function registerSirket(req, res) {
   }
 }
 
+async function getSession(req, res) {
+  return successResponse(res, "Oturum geçerli.", { user: req.user });
+}
+
+async function logout(req, res) {
+  clearAuthCookies(res);
+  return successResponse(res, "Oturum kapatıldı.");
+}
+
 module.exports = {
   loginAdmin,
   loginCavus,
   loginSofor,
   loginSirket,
   registerSirket,
+  getSession,
+  logout,
 };

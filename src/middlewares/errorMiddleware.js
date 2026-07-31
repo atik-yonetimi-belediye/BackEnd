@@ -1,13 +1,35 @@
-function errorMiddleware(err, req, res, next) {
+const multer = require("multer");
+const { cleanupUploadedFiles } = require("../utils/uploadFiles");
+
+async function errorMiddleware(err, req, res, next) {
   if (res.headersSent) {
     return next(err);
   }
 
-  const statusCode = err.statusCode || err.status || 500;
+  if (req.files?.length && !req.uploadsPersisted) {
+    await cleanupUploadedFiles(req.files);
+  }
+
+  let statusCode = err.statusCode || err.status || 500;
+  let operationalMessage = err.message;
+
+  if (err instanceof multer.MulterError) {
+    statusCode = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
+    operationalMessage =
+      err.code === "LIMIT_FILE_SIZE"
+        ? "Bir fotoğraf en fazla 5 MB olabilir."
+        : "Fotoğraf yükleme sınırları aşıldı veya alan adı geçersiz.";
+  }
+
+  if (err.type === "entity.too.large") {
+    statusCode = 413;
+    operationalMessage = "İstek gövdesi izin verilen boyutu aşıyor.";
+  }
+
   const message =
     statusCode === 500
       ? "Sunucuda beklenmeyen bir hata oluştu."
-      : err.message;
+      : operationalMessage;
 
   if (statusCode >= 500) {
     console.error("Sunucu hatası:", err);

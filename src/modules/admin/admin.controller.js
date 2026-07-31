@@ -3,7 +3,12 @@ const { successResponse, errorResponse } = require("../../utils/response");
 
 const allowedAtikTurleri = ["kati_atik", "geri_donusum"];
 
-const allowedSirketOnayDurumlari = ["bekliyor", "onaylandi", "reddedildi"];
+const allowedSirketOnayDurumlari = [
+  "bekliyor",
+  "onaylandi",
+  "reddedildi",
+  "pasif",
+];
 
 const allowedToplamaDurumlari = ["toplandi", "atlanildi"];
 
@@ -26,7 +31,7 @@ async function getDashboard(req, res) {
 
 async function getAllCavuslar(req, res) {
   try {
-    const data = await adminService.getAllCavuslar();
+    const data = await adminService.getAllCavuslar(req.query);
 
     return successResponse(res, "Çavuşlar listelendi.", data);
   } catch (error) {
@@ -36,7 +41,7 @@ async function getAllCavuslar(req, res) {
 
 async function getAllSoforler(req, res) {
   try {
-    const data = await adminService.getAllSoforler();
+    const data = await adminService.getAllSoforler(req.query);
 
     return successResponse(res, "Şoförler listelendi.", data);
   } catch (error) {
@@ -53,6 +58,8 @@ async function getAllSirketler(req, res) {
     }
 
     const filters = {};
+    filters.page = req.query.page;
+    filters.limit = req.query.limit;
 
     if (onay_durumu) {
       filters.onay_durumu = onay_durumu;
@@ -107,6 +114,8 @@ async function getAllKonteynerler(req, res) {
     }
 
     const filters = {};
+    filters.page = req.query.page;
+    filters.limit = req.query.limit;
 
     if (tur) {
       filters.tur = tur;
@@ -138,6 +147,8 @@ async function getAllAraclar(req, res) {
     }
 
     const filters = {};
+    filters.page = req.query.page;
+    filters.limit = req.query.limit;
 
     if (arac_turu) {
       filters.arac_turu = arac_turu;
@@ -170,6 +181,8 @@ async function getAllToplamaKayitlari(req, res) {
     }
 
     const filters = {};
+    filters.page = req.query.page;
+    filters.limit = req.query.limit;
 
     if (durum) {
       filters.durum = durum;

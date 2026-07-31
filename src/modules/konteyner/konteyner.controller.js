@@ -3,23 +3,7 @@ const { successResponse, errorResponse } = require("../../utils/response");
 
 async function getAllKonteynerler(req, res) {
   try {
-    const { tur, mahalle_id, aktif_mi } = req.query;
-
-    const filters = {};
-
-    if (tur) {
-      filters.tur = tur;
-    }
-
-    if (mahalle_id) {
-      filters.mahalle_id = mahalle_id;
-    }
-
-    if (aktif_mi !== undefined) {
-      filters.aktif_mi = aktif_mi === "true";
-    }
-
-    const data = await konteynerService.getAllKonteynerler(filters);
+    const data = await konteynerService.getAllKonteynerler(req.query);
 
     return successResponse(res, "Konteynerler başarıyla listelendi.", data);
   } catch (error) {

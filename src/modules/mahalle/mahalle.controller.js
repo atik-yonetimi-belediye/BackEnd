@@ -3,7 +3,7 @@ const { successResponse, errorResponse } = require("../../utils/response");
 
 async function getAllMahalleler(req, res) {
   try {
-    const data = await mahalleService.getAllMahalleler();
+    const data = await mahalleService.getAllMahalleler(req.query);
     return successResponse(res, "Mahalleler başarıyla listelendi.", data);
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);

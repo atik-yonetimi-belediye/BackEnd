@@ -1,41 +1,37 @@
-const { z } = require('zod');
+const AppError = require("../utils/AppError");
 
-const validateBody = (schema) => (req, res, next) => {
-  try {
-    req.body = schema.parse(req.body);
-    next();
-  } catch (err) {
-    if (err instanceof z.ZodError) {
-      const errorMessages = err.errors.map(e => e.message).join(", ");
-      return res.status(400).json({
-        success: false,
-        message: `Geçersiz veri: ${errorMessages}`
-      });
+function formatIssues(issues) {
+  return issues.map((issue) => ({
+    field: issue.path.join(".") || "request",
+    message: issue.message,
+  }));
+}
+
+function validate(schema, source) {
+  return (req, res, next) => {
+    const result = schema.safeParse(req[source]);
+
+    if (!result.success) {
+      return next(
+        new AppError(
+          "Gönderilen veriler geçersiz.",
+          400,
+          formatIssues(result.error.issues)
+        )
+      );
     }
-    next(err);
-  }
-};
 
-// Validation Schemas
-const sikayetCreateSchema = z.object({
-  vatandas_ad_soyad: z.string().min(3, "Ad soyad en az 3 karakter olmalıdır"),
-  vatandas_telefon: z.string().min(10, "Telefon numarası eksik veya hatalı"),
-  konteyner_id: z.union([z.string(), z.number()]).optional(),
-  sikayet_turu: z.enum(['kati_atik', 'geri_donusum']).default('kati_atik'),
-  sikayet_kategorisi: z.string().optional(),
-  sikayet_metni: z.string().min(5, "Şikayet detayı en az 5 karakter olmalıdır")
-});
+    req[source] = result.data;
+    return next();
+  };
+}
 
-const sirketRegisterSchema = z.object({
-  ad: z.string().min(2, "Şirket adı en az 2 karakter olmalıdır"),
-  mail: z.string().email("Geçerli bir e-posta adresi giriniz"),
-  telefon: z.string().min(10, "Telefon numarası eksik veya hatalı"),
-  sifre: z.string().min(6, "Şifre en az 6 karakter olmalıdır"),
-  adres: z.string().optional().nullable()
-});
+const validateBody = (schema) => validate(schema, "body");
+const validateParams = (schema) => validate(schema, "params");
+const validateQuery = (schema) => validate(schema, "query");
 
 module.exports = {
   validateBody,
-  sikayetCreateSchema,
-  sirketRegisterSchema
+  validateParams,
+  validateQuery,
 };

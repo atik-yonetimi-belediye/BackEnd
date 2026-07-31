@@ -14,12 +14,34 @@ const sikayetRoutes = require("./modules/sikayet/sikayet.routes");
 const sirketRoutes = require("./modules/sirket/sirket.routes");
 const recyclingRoutes = require("./modules/recycling/recycling.routes");
 const adminRoutes = require("./modules/admin/admin.routes");
+const publicRoutes = require("./modules/public/public.routes");
 
 const AppError = require("./utils/AppError");
 const asyncHandler = require("./utils/asyncHandler");
 const errorMiddleware = require("./middlewares/errorMiddleware");
 
 const app = express();
+
+const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS || 0);
+if (
+  !Number.isInteger(trustProxyHops) ||
+  trustProxyHops < 0 ||
+  trustProxyHops > 10
+) {
+  throw new Error("TRUST_PROXY_HOPS 0 ile 10 arasında tam sayı olmalıdır.");
+}
+app.set("trust proxy", trustProxyHops);
+
+const defaultCorsOrigins = [
+  "http://localhost:5180",
+  "http://127.0.0.1:5180",
+];
+const allowedCorsOrigins = new Set(
+  (process.env.CORS_ORIGINS || defaultCorsOrigins.join(","))
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
 
 // 1. HTTP Security Headers (Helmet)
 app.use(
@@ -32,6 +54,8 @@ app.use(
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 300,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
   message: {
     success: false,
     message: "Çok fazla istek gönderildi. Lütfen bir süre sonra tekrar deneyiniz."
@@ -42,6 +66,9 @@ const generalLimiter = rateLimit({
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 15,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
   message: {
     success: false,
     message: "Çok sayıda hatalı veya üst üste deneme yapıldı. Lütfen 15 dakika bekleyiniz."
@@ -50,12 +77,17 @@ const authLimiter = rateLimit({
 
 app.use(
   cors({
-    origin: true,
+    origin(origin, callback) {
+      if (!origin || allowedCorsOrigins.has(origin)) {
+        return callback(null, true);
+      }
+      return callback(new AppError("Bu origin için CORS erişimine izin verilmiyor.", 403));
+    },
     credentials: true,
   })
 );
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 
@@ -66,26 +98,21 @@ app.get("/", (req, res) => {
   });
 });
 
-app.get(
-  "/db-test",
-  asyncHandler(async (req, res) => {
-    const result = await pool.query("SELECT NOW() AS current_time");
+const healthHandler = asyncHandler(async (req, res) => {
+  await pool.query("SELECT 1");
+  res.status(200).json({ success: true, status: "ok" });
+});
 
-    res.json({
-      success: true,
-      message: "PostgreSQL bağlantısı başarılı.",
-      data: result.rows[0],
-    });
-  })
-);
+app.get("/health", healthHandler);
 
 // Apply rate limiters
 app.use("/api/", generalLimiter);
-app.use("/api/auth/login", authLimiter);
-app.use("/api/auth/sirket/register", authLimiter);
+app.use("/api/auth", authLimiter);
+app.get("/api/health", healthHandler);
 
 // Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/public", publicRoutes);
 app.use("/api/mahalleler", mahalleRoutes);
 app.use("/api/konteynerler", konteynerRoutes);
 app.use("/api/cavus", cavusRoutes);

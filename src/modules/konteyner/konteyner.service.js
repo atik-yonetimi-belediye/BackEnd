@@ -1,7 +1,12 @@
 const pool = require("../../config/db");
+const {
+  getPagination,
+  toPaginatedResult,
+} = require("../../utils/pagination");
 
 async function getAllKonteynerler(filters = {}) {
   const { tur, mahalle_id, aktif_mi } = filters;
+  const { page, limit, offset } = getPagination(filters);
 
   const values = [];
   const conditions = [];
@@ -41,17 +46,19 @@ async function getAllKonteynerler(filters = {}) {
       k.aktif_mi,
       k.created_at,
       k.updated_at,
+      COUNT(*) OVER() AS total_count,
       (SELECT MAX(tarih_saat) FROM toplama_kayitlari tk WHERE tk.konteyner_id = k.id AND tk.durum = 'toplandi') as son_toplanma_tarihi
     FROM konteynerler k
     JOIN mahalleler m ON m.id = k.mahalle_id
     LEFT JOIN cavuslar c ON c.id = k.cavus_id
     ${whereClause}
     ORDER BY k.id ASC
+    LIMIT $${values.length + 1} OFFSET $${values.length + 2}
     `,
-    values
+    [...values, limit, offset]
   );
 
-  return result.rows;
+  return toPaginatedResult(result.rows, page, limit);
 }
 
 async function getKonteynerById(id) {

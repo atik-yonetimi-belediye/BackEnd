@@ -5,7 +5,14 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "migrate": "node src/scripts/migrateDatabase.js",
+    "seed": "node src/scripts/seedDatabase.js",
+    "lint": "oxlint src tests",
+    "test": "node --test --test-concurrency=1 tests/unit/*.test.js",
+    "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.js",
+    "test:all": "npm run test && npm run test:integration",
+    "check": "npm run lint && npm test"
   },
   "repository": {
     "type": "git",
@@ -20,7 +27,7 @@
   },
   "homepage": "https://github.com/atik-yonetimi-belediye/backend#readme",
   "dependencies": {
-    "bcrypt": "^5.1.1",
+    "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
@@ -32,6 +39,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14"
+    "nodemon": "^3.1.14",
+    "oxlint": "^1.76.0",
+    "supertest": "^7.2.2"
   }
 }

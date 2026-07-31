@@ -19,7 +19,7 @@ async function getMe(req, res) {
 
 async function getMyKonteynerler(req, res) {
   try {
-    const data = await cavusService.getMyKonteynerler(req.user.id);
+    const data = await cavusService.getMyKonteynerler(req.user.id, req.query);
     return successResponse(res, "Çavuşa ait konteynerler listelendi.", data);
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
@@ -30,10 +30,10 @@ async function createKonteyner(req, res) {
   try {
     const { konteyner_kodu, tur, latitude, longitude } = req.body;
 
-    if (!konteyner_kodu || !tur || latitude === undefined || longitude === undefined) {
+    if (!tur || latitude === undefined || longitude === undefined) {
       return errorResponse(
         res,
-        "Konteyner kodu, tür, latitude ve longitude zorunludur.",
+        "Tür, latitude ve longitude zorunludur.",
         400
       );
     }
@@ -85,7 +85,7 @@ async function passiveKonteyner(req, res) {
 
 async function getMyAraclar(req, res) {
   try {
-    const data = await cavusService.getMyAraclar(req.user.id);
+    const data = await cavusService.getMyAraclar(req.user.id, req.query);
     return successResponse(res, "Çavuşa ait araçlar listelendi.", data);
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
@@ -137,7 +137,7 @@ async function passiveArac(req, res) {
 
 async function getMySoforler(req, res) {
   try {
-    const data = await cavusService.getMySoforler(req.user.id);
+    const data = await cavusService.getMySoforler(req.user.id, req.query);
     return successResponse(res, "Çavuşa ait şoförler listelendi.", data);
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
@@ -200,7 +200,10 @@ async function passiveSofor(req, res) {
 
 async function getMyToplamaKayitlari(req, res) {
   try {
-    const data = await cavusService.getMyToplamaKayitlari(req.user.id);
+    const data = await cavusService.getMyToplamaKayitlari(
+      req.user.id,
+      req.query
+    );
     return successResponse(res, "Toplama kayıtları başarıyla getirildi.", data);
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
@@ -245,4 +248,4 @@ module.exports = {
   updateSoforArac,
   passiveSofor,
   getMyToplamaKayitlari,
-};
+};

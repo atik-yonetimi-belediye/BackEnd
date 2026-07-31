@@ -1,5 +1,5 @@
 const { Pool } = require("pg");
-require("dotenv").config();
+require("dotenv").config({ quiet: true });
 
 const pool = new Pool({
   host: process.env.DB_HOST,
@@ -7,10 +7,6 @@ const pool = new Pool({
   database: process.env.DB_NAME,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-});
-
-pool.on("connect", () => {
-  console.log("PostgreSQL bağlantısı başarılı.");
 });
 
 pool.on("error", (err) => {
