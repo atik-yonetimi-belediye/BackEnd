@@ -2,6 +2,24 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const schemas = require("../../src/middlewares/validationSchemas");
 
+test("tekil giriş yalnızca kullanıcı bilgisi ve şifre kabul eder", () => {
+  assert.equal(
+    schemas.auth.login.safeParse({
+      identifier: "+90 505 222 33 44",
+      sifre: "cavus123",
+    }).success,
+    true
+  );
+  assert.equal(
+    schemas.auth.login.safeParse({
+      identifier: "denizk",
+      sifre: "admin123",
+      role: "admin",
+    }).success,
+    false
+  );
+});
+
 test("şirket kaydı verilerini normalize eder", () => {
   const result = schemas.auth.sirketRegister.parse({
     ad: "  Örnek Geri Dönüşüm  ",

@@ -1,0 +1,88 @@
+name: Backend kalite kontrolleri
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: belediye_atik
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d belediye_atik"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_NAME: belediye_atik
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      JWT_SECRET: integration-test-secret-at-least-thirty-two
+      JWT_EXPIRES_IN: 1h
+      CORS_ORIGINS: http://localhost:5180
+      TRUST_PROXY_HOPS: 1
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Veritabanı şemasını al
+        uses: actions/checkout@v4
+        with:
+          repository: atik-yonetimi-belediye/Database
+          path: Database
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test
+      - name: Gelistirme semasini kur
+        env:
+          PGPASSWORD: postgres
+        run: psql -h 127.0.0.1 -U postgres -d belediye_atik -v ON_ERROR_STOP=1 -f Database/belediye-AtikYonetimi-veritabani.sql
+      - run: npm run test:integration
+      - run: npm audit --omit=dev --audit-level=high
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: atik-yonetimi-backend:ci
+      - uses: anchore/scan-action@v7
+        with:
+          image: atik-yonetimi-backend:ci
+          severity-cutoff: high
+          fail-build: true

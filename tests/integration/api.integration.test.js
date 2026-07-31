@@ -4,6 +4,20 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const request = require("supertest");
 
+// Yerel Docker kurulumu ve CI ayni test komutunu kullanabilsin. Ortamdan
+// verilen degerler her zaman onceliklidir; gelistirme kokundeki .env yalnizca
+// eksik degerleri tamamlar.
+require("dotenv").config({
+  path: path.resolve(__dirname, "../../../.env"),
+  quiet: true,
+});
+
+process.env.DB_HOST = process.env.DB_HOST || "127.0.0.1";
+process.env.DB_PORT = process.env.DB_PORT || "5433";
+process.env.DB_NAME = process.env.DB_NAME || "belediye_atik";
+process.env.DB_USER = process.env.DB_USER || "postgres";
+process.env.DB_PASSWORD = process.env.DB_PASSWORD || "postgres";
+
 process.env.JWT_SECRET =
   process.env.JWT_SECRET || "integration-test-secret-at-least-thirty-two";
 process.env.JWT_EXPIRES_IN = "1h";
@@ -32,6 +46,7 @@ let uploadedPhotoPath;
 let externalCavusId;
 let externalVehicleId;
 let externalContainerId;
+let testCollectionId;
 
 function readCsrfCookie(response) {
   const cookie = response.headers["set-cookie"]?.find((value) =>
@@ -58,6 +73,9 @@ test.after(async () => {
       testRecyclingId,
     ]);
   }
+  if (testCollectionId) {
+    await pool.query("DELETE FROM toplama_kayitlari WHERE id = $1", [testCollectionId]);
+  }
   if (uploadedPhotoPath) {
     await fs.rm(uploadedPhotoPath, { force: true });
   }
@@ -76,8 +94,9 @@ test.after(async () => {
 });
 
 test("sağlık, CORS ve bilinmeyen route davranışları doğrudur", async () => {
-  const health = await request(app).get("/health").expect(200);
+  const health = await request(app).get("/health").set("X-Request-ID", "integration-request-0001").expect(200);
   assert.equal(health.body.success, true);
+  assert.equal(health.headers["x-request-id"], "integration-request-0001");
   const proxiedHealth = await request(app).get("/api/health").expect(200);
   assert.equal(proxiedHealth.body.status, "ok");
 
@@ -115,30 +134,30 @@ test("genel endpoint gerçek veri ve sayfalama metası döndürür", async () =>
 
 test("tüm kullanıcı rolleri giriş yapabilir ve rol sınırı uygulanır", async () => {
   const admin = await adminAgent
-    .post("/api/auth/admin/login")
-    .send({ kullanici_adi: "denizk", sifre: "admin123" })
+    .post("/api/auth/login")
+    .send({ identifier: "denizk", sifre: "admin123" })
     .expect(200);
   adminCsrf = readCsrfCookie(admin);
   assert.equal(admin.body.data.token, undefined);
   assert.equal(admin.body.data.user.role, "admin");
 
   const cavus = await cavusAgent
-    .post("/api/auth/cavus/login")
-    .send({ telefon: "+90 505 222 33 44", sifre: "cavus123" })
+    .post("/api/auth/login")
+    .send({ identifier: "+90 505 222 33 44", sifre: "cavus123" })
     .expect(200);
   cavusCsrf = readCsrfCookie(cavus);
 
   const sofor = await soforAgent
-    .post("/api/auth/sofor/login")
-    .send({ telefon: "05053334455", sifre: "sofor123" })
+    .post("/api/auth/login")
+    .send({ identifier: "05053334455", sifre: "sofor123" })
     .expect(200);
   soforCsrf = readCsrfCookie(sofor);
   assert.equal(sofor.body.data.user.role, "sofor");
 
   const sirket = await sirketAgent
-    .post("/api/auth/sirket/login")
+    .post("/api/auth/login")
     .send({
-      mail: "BILGI@CEVIKGERIDONUSUM.COM",
+      identifier: "03441112233",
       sifre: "sirket123",
     })
     .expect(200);
@@ -199,6 +218,54 @@ test("rol bazlı tüm okuma endpointleri geçerli SQL ve tutarlı yanıt üretir
   for (const endpoint of sirketEndpoints) {
     await sirketAgent.get(endpoint).expect(200);
   }
+});
+
+test("metrik, frontend hata ve saha telemetrisi gözlemlenebilirlik verisi üretir", async () => {
+  const metrics = await request(app).get("/metrics").expect(200);
+  assert.match(metrics.text, /atik_http_request_duration_seconds/);
+
+  await request(app)
+    .post("/api/client-errors")
+    .send({ kind: "window-error", message: "Entegrasyon gözlemlenebilirlik kontrolü", path: "/test" })
+    .expect(202);
+
+  await soforAgent
+    .post("/api/telemetry")
+    .set("X-CSRF-Token", soforCsrf)
+    .send({ event: "collection_success", duration_ms: 1250 })
+    .expect(202);
+
+  const updatedMetrics = await request(app).get("/metrics").expect(200);
+  assert.match(updatedMetrics.text, /atik_frontend_errors_total\{kind="window-error"\} 1/);
+  assert.match(updatedMetrics.text, /atik_pilot_events_total\{event="collection_success",role="sofor"\} 1/);
+});
+
+test("aynı idempotency anahtarı çift toplama kaydı oluşturmaz", async () => {
+  const available = await soforAgent.get("/api/sofor/konteynerler?limit=1").expect(200);
+  assert.ok(available.body.data.length > 0, "Şoför için uygun konteyner bulunmalıdır.");
+  const payload = { konteyner_id: available.body.data[0].id, durum: "toplandi" };
+  const key = "integration-idempotency-00000001";
+
+  const first = await soforAgent
+    .post("/api/sofor/toplama-kayitlari")
+    .set("X-CSRF-Token", soforCsrf)
+    .set("Idempotency-Key", key)
+    .send(payload)
+    .expect(201);
+  const second = await soforAgent
+    .post("/api/sofor/toplama-kayitlari")
+    .set("X-CSRF-Token", soforCsrf)
+    .set("Idempotency-Key", key)
+    .send(payload)
+    .expect(201);
+
+  testCollectionId = first.body.data.id;
+  assert.equal(second.body.data.id, testCollectionId);
+  const count = await pool.query(
+    "SELECT COUNT(*)::int AS count FROM toplama_kayitlari WHERE idempotency_key = $1",
+    [key]
+  );
+  assert.equal(count.rows[0].count, 1);
 });
 
 test("şoför ve çavuş başka sorumluluk bölgesindeki kayıtlara erişemez", async () => {
@@ -339,15 +406,64 @@ test("şirket talebi içerik bütünlüğünü ve durum yaşam döngüsünü kor
 
 test("başarısız girişler kullanıcı varlığını açığa çıkarmaz", async () => {
   const missing = await request(app)
-    .post("/api/auth/admin/login")
-    .send({ kullanici_adi: "olmayan-kullanici", sifre: "yanlis" })
+    .post("/api/auth/login")
+    .send({ identifier: "olmayan-kullanici", sifre: "yanlis" })
     .expect(401);
   const wrongPassword = await request(app)
-    .post("/api/auth/admin/login")
-    .send({ kullanici_adi: "denizk", sifre: "yanlis" })
+    .post("/api/auth/login")
+    .send({ identifier: "denizk", sifre: "yanlis" })
     .expect(401);
 
   assert.equal(missing.body.message, wrongPassword.body.message);
+});
+
+test("rol gönderimi reddedilir ve eski rol bazlı giriş endpointleri kapalıdır", async () => {
+  await request(app)
+    .post("/api/auth/login")
+    .send({ identifier: "denizk", sifre: "admin123", role: "admin" })
+    .expect(400);
+
+  await request(app)
+    .post("/api/auth/admin/login")
+    .send({ identifier: "denizk", sifre: "admin123" })
+    .expect(404);
+});
+
+test("pasif ve onaysız hesaplar genel hata ile girişten engellenir", async () => {
+  const admin = await pool.query(
+    "SELECT id, aktif_mi FROM yoneticiler WHERE kullanici_adi = 'denizk'"
+  );
+  const sirket = await pool.query(
+    "SELECT id, onay_durumu FROM sirketler WHERE telefon = '03441112233'"
+  );
+
+  try {
+    await pool.query("UPDATE yoneticiler SET aktif_mi = false WHERE id = $1", [
+      admin.rows[0].id,
+    ]);
+    await request(app)
+      .post("/api/auth/login")
+      .send({ identifier: "denizk", sifre: "admin123" })
+      .expect(401);
+
+    await pool.query(
+      "UPDATE sirketler SET onay_durumu = 'bekliyor' WHERE id = $1",
+      [sirket.rows[0].id]
+    );
+    await request(app)
+      .post("/api/auth/login")
+      .send({ identifier: "03441112233", sifre: "sirket123" })
+      .expect(401);
+  } finally {
+    await pool.query("UPDATE yoneticiler SET aktif_mi = $1 WHERE id = $2", [
+      admin.rows[0].aktif_mi,
+      admin.rows[0].id,
+    ]);
+    await pool.query(
+      "UPDATE sirketler SET onay_durumu = $1 WHERE id = $2",
+      [sirket.rows[0].onay_durumu, sirket.rows[0].id]
+    );
+  }
 });
 
 test("sahte görsel reddedilir ve geçici dosya bırakılmaz", async () => {
@@ -425,6 +541,36 @@ test("şikâyet görseli kaydedilir, durum akışı korunur ve arşivlemede sili
   assert.equal(archived.rows[0].aktif_mi, false);
 });
 
+test("merkezî telefon kaydı rol tabloları arası çakışmayı engeller", async () => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await assert.rejects(
+      client.query("UPDATE soforler SET telefon = (SELECT telefon FROM cavuslar ORDER BY id LIMIT 1) WHERE id = (SELECT id FROM soforler ORDER BY id LIMIT 1)"),
+      (error) => error.code === "23505"
+    );
+  } finally {
+    await client.query("ROLLBACK");
+    client.release();
+  }
+});
+
+test("yönetici yazma işlemleri değiştirilemez audit kaydı üretir", async () => {
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const audit = await pool.query("SELECT id, request_id FROM audit_logs WHERE actor_role = 'admin' ORDER BY id DESC LIMIT 1");
+  assert.ok(audit.rowCount > 0);
+  assert.ok(audit.rows[0].request_id);
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await assert.rejects(client.query("UPDATE audit_logs SET action = 'PUT' WHERE id = $1", [audit.rows[0].id]));
+  } finally {
+    await client.query("ROLLBACK");
+    client.release();
+  }
+});
+
 test("çıkış endpoint'i oturum cookie'lerini temizler", async () => {
   const response = await adminAgent
     .post("/api/auth/logout")
@@ -444,8 +590,8 @@ test("kimlik doğrulama endpointleri sıkı istek sınırı uygular", async () =
   let limitedResponse;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const response = await request(app)
-      .post("/api/auth/admin/login")
-      .send({ kullanici_adi: "rate-limit-test", sifre: "yanlis" });
+      .post("/api/auth/login")
+      .send({ identifier: "rate-limit-test", sifre: "yanlis" });
     if (response.status === 429) {
       limitedResponse = response;
       break;

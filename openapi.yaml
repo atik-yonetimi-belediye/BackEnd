@@ -1,0 +1,170 @@
+openapi: 3.1.0
+info:
+  title: Onikişubat Belediyesi Atık Yönetimi API
+  version: 1.0.0
+  description: Cookie tabanlı oturum, CSRF koruması ve rol bazlı yetkilendirme kullanan API sözleşmesi.
+servers:
+  - url: /api
+security:
+  - cookieAuth: []
+paths:
+  /auth/login:
+    post:
+      security: []
+      summary: Kullanıcı bilgisi ve şifreyle tekil giriş
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200': { description: Oturum cookie'si oluşturuldu, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /auth/session:
+    get:
+      summary: Geçerli oturum kullanıcısı
+      responses:
+        '200': { description: Oturum geçerli }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /auth/logout:
+    post:
+      summary: Oturumu ve cookie'leri temizler
+      responses: { '200': { description: Çıkış yapıldı } }
+  /public/stats:
+    get:
+      security: []
+      summary: Genel çevresel etki istatistikleri
+      responses: { '200': { description: İstatistikler } }
+  /konteynerler:
+    get:
+      security: []
+      summary: Aktif konteynerleri sayfalı listeler
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses: { '200': { $ref: '#/components/responses/Paginated' } }
+  /sikayetler:
+    post:
+      security: []
+      summary: Vatandaş şikâyeti ve en fazla üç fotoğraf oluşturur
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [vatandas_ad_soyad, vatandas_telefon, konteyner_id, sikayet_turu, sikayet_metni]
+              properties:
+                vatandas_ad_soyad: { type: string, minLength: 3 }
+                vatandas_telefon: { type: string, pattern: '^05[0-9]{9}$' }
+                konteyner_id: { type: integer, minimum: 1 }
+                sikayet_turu: { type: string, enum: [kati_atik, geri_donusum] }
+                sikayet_kategorisi: { type: string }
+                sikayet_metni: { type: string }
+                fotograflar: { type: array, maxItems: 3, items: { type: string, format: binary } }
+      responses: { '201': { description: Şikâyet oluşturuldu }, '400': { $ref: '#/components/responses/BadRequest' } }
+    get:
+      summary: Yönetici için şikâyet listesi
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/Limit' }]
+      responses: { '200': { $ref: '#/components/responses/Paginated' }, '403': { $ref: '#/components/responses/Forbidden' } }
+  /sikayetler/{id}/durum:
+    patch:
+      summary: Şikâyet durumunu günceller
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [durum], properties: { durum: { type: string, enum: [bekliyor, inceleniyor, cozuldu, reddedildi] }, yonetici_notu: { type: string } } } } }
+      responses: { '200': { description: Güncellendi }, '409': { description: Geçersiz durum geçişi } }
+  /sofor/konteynerler:
+    get:
+      summary: Şoförün çevrimdışı önbelleğe alınabilen görevleri
+      x-required-role: sofor
+      parameters: [{ $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/Limit' }]
+      responses: { '200': { $ref: '#/components/responses/Paginated' }, '403': { $ref: '#/components/responses/Forbidden' } }
+  /sofor/toplama-kayitlari:
+    post:
+      summary: İdempotent toplama veya atlama kaydı
+      x-required-role: sofor
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string, minLength: 20, maxLength: 64, pattern: '^[A-Za-z0-9-]+$' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CollectionRequest' } } }
+      responses: { '201': { description: Kayıt oluşturuldu veya aynı anahtarın mevcut kaydı döndürüldü }, '403': { $ref: '#/components/responses/Forbidden' } }
+  /cavus/me:
+    get:
+      summary: Çavuş profili
+      x-required-role: cavus
+      responses: { '200': { description: Profil }, '403': { $ref: '#/components/responses/Forbidden' } }
+  /cavus/{resource}:
+    get:
+      summary: Çavuşun konteyner, araç, şoför veya toplama kayıtları
+      x-required-role: cavus
+      parameters:
+        - name: resource
+          in: path
+          required: true
+          schema: { type: string, enum: [konteynerler, araclar, soforler, toplama-kayitlari] }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses: { '200': { $ref: '#/components/responses/Paginated' } }
+  /admin/dashboard:
+    get:
+      summary: Yönetici özet metrikleri
+      x-required-role: admin
+      responses: { '200': { description: Dashboard özeti }, '403': { $ref: '#/components/responses/Forbidden' } }
+  /admin/{resource}:
+    get:
+      summary: Yönetici listeleri
+      x-required-role: admin
+      parameters:
+        - name: resource
+          in: path
+          required: true
+          schema: { type: string, enum: [cavuslar, soforler, sirketler, konteynerler, araclar, toplama-kayitlari] }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses: { '200': { $ref: '#/components/responses/Paginated' } }
+  /sirket/geri-donusum-talepleri:
+    get:
+      summary: Şirketin talepleri
+      x-required-role: sirket
+      responses: { '200': { $ref: '#/components/responses/Paginated' } }
+    post:
+      summary: Yeni geri dönüşüm talebi
+      x-required-role: sirket
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { talep_basligi: { type: string }, talep_aciklamasi: { type: string }, tahmini_miktar: { type: number, exclusiveMinimum: 0 }, adres: { type: string } } } } }
+      responses: { '201': { description: Talep oluşturuldu } }
+components:
+  securitySchemes:
+    cookieAuth: { type: apiKey, in: cookie, name: auth_token }
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: integer, minimum: 1 } }
+    Page: { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+  schemas:
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [identifier, sifre]
+      properties: { identifier: { type: string }, sifre: { type: string, format: password } }
+    AuthResponse:
+      type: object
+      properties: { success: { type: boolean }, data: { type: object, properties: { user: { type: object, properties: { id: { type: integer }, role: { type: string, enum: [admin, cavus, sofor, sirket] } } } } } }
+    CollectionRequest:
+      type: object
+      required: [konteyner_id, durum]
+      properties: { konteyner_id: { type: integer, minimum: 1 }, durum: { type: string, enum: [toplandi, atlanildi] }, sebep: { type: string }, diger_aciklama: { type: string } }
+  responses:
+    Paginated: { description: Sayfalı başarılı yanıt }
+    BadRequest: { description: Geçersiz istek }
+    Unauthorized: { description: Kimlik doğrulanamadı }
+    Forbidden: { description: Rol bu işlem için yetkili değil }
+    RateLimited: { description: İstek sınırı aşıldı }
