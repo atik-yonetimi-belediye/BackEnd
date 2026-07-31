@@ -1,9 +1,13 @@
-FROM node:20-alpine
+FROM node:24-alpine
+
+RUN apk upgrade --no-cache
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev \
+  && npm cache clean --force \
+  && rm -rf /root/.npm /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 COPY . .
 
