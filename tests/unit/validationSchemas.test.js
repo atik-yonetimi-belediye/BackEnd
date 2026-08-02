@@ -93,4 +93,94 @@ test("tarih aralığı ve pozitif tahmini miktar kuralları uygulanır", () => {
     }).success,
     false
   );
+
+  assert.equal(
+    schemas.sirket.updateTalep.safeParse({ konteyner_id: 12 }).success,
+    true
+  );
+  assert.equal(
+    schemas.sirket.updateTalep.safeParse({ konteyner_id: null }).success,
+    true
+  );
+  assert.equal(
+    schemas.sirket.updateTalep.safeParse({ konteyner_id: -1 }).success,
+    false
+  );
+});
+
+test("yönetici personel oluşturma ve güncelleme alanları sıkı doğrulanır", () => {
+  assert.equal(
+    schemas.admin.createCavus.safeParse({
+      ad_soyad: "Ayşe Yılmaz",
+      telefon: "0505 111 22 33",
+      sifre: "GucluSifre123",
+      mahalle_id: 2,
+    }).success,
+    true
+  );
+  assert.equal(
+    schemas.admin.createSofor.safeParse({
+      ad: "Mehmet",
+      soyad: "Kaya",
+      telefon: "0505 111 22 34",
+      sifre: "GucluSifre123",
+      cavus_id: 2,
+      arac_id: 3,
+    }).success,
+    true
+  );
+  assert.equal(schemas.admin.updateCavus.safeParse({}).success, false);
+  assert.equal(schemas.admin.updateSofor.safeParse({ arac_id: null }).success, true);
+  assert.equal(
+    schemas.admin.resetPersonelPassword.safeParse({ sifre: "kisa" }).success,
+    false
+  );
+});
+
+test("yönetici araç oluşturma, aktarma ve filtre alanları doğrulanır", () => {
+  assert.equal(schemas.admin.createArac.safeParse({
+    plaka: "46 ABC 123",
+    arac_turu: "kati_atik",
+    cavus_id: 2,
+  }).success, true);
+  assert.equal(schemas.admin.createArac.safeParse({
+    plaka: "geçersiz",
+    arac_turu: "kati_atik",
+    cavus_id: 2,
+  }).success, false);
+  assert.equal(schemas.admin.updateAracAtama.safeParse({ cavus_id: 3, sofor_id: null }).success, true);
+  assert.equal(schemas.admin.updateAracAtama.safeParse({ cavus_id: 3, sofor_id: 0 }).success, false);
+  assert.equal(schemas.admin.aracListQuery.safeParse({ atama_durumu: "bosta" }).success, true);
+});
+
+test("konteyner görev atama ve durum alanları güvenli doğrulanır", () => {
+  assert.equal(schemas.admin.createKonteynerGorevi.safeParse({
+    cavus_id: 1,
+    sofor_id: 2,
+    oncelik: "acil",
+    hedef_tarih: "2026-08-02T15:30:00+03:00",
+  }).success, true);
+  assert.equal(schemas.admin.createKonteynerGorevi.safeParse({
+    cavus_id: 1,
+    sofor_id: 2,
+    oncelik: "bilinmeyen",
+  }).success, false);
+  assert.equal(schemas.admin.updateKonteynerCavus.safeParse({
+    cavus_id: 3,
+    acik_gorevi_iptal_et: true,
+    farkli_mahalle_onayi: true,
+  }).success, true);
+  assert.equal(schemas.sofor.gorevListQuery.safeParse({ durum: "devam_ediyor" }).success, true);
+});
+
+test("toplu görev, yetki ve isteğe bağlı konum kanıtı birlikte doğrulanır", () => {
+  const bulk = schemas.admin.bulkKonteynerGorevi.safeParse({
+    konteyner_ids: [1, 2, 2], cavus_id: 1, sofor_id: 2,
+  });
+  assert.equal(bulk.success, true);
+  assert.deepEqual(bulk.data.konteyner_ids, [1, 2]);
+  assert.equal(schemas.admin.bulkKonteynerGorevi.safeParse({ konteyner_ids: [], cavus_id: 1, sofor_id: 2 }).success, false);
+  assert.equal(schemas.admin.updatePersonelYetkileri.safeParse({ permissions: [{ code: "task.assign", allowed: false }] }).success, true);
+  assert.equal(schemas.sofor.createToplamaKaydi.safeParse({ konteyner_id: 1, durum: "toplandi", latitude: 37.5 }).success, false);
+  assert.equal(schemas.sofor.createToplamaKaydi.safeParse({ konteyner_id: 1, durum: "toplandi", latitude: 37.5, longitude: 36.9, konum_dogruluk_metre: 8 }).success, true);
 });

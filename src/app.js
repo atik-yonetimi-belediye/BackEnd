@@ -4,6 +4,7 @@ const path = require("path");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const pool = require("./config/db");
+const { createCorsOriginValidator } = require("./config/corsOrigins");
 const requestContext = require("./middlewares/requestContext");
 const { createRateLimitStore } = require("./config/redis");
 const auditLogger = require("./middlewares/auditLogger");
@@ -50,6 +51,7 @@ const allowedCorsOrigins = new Set(
     .map((origin) => origin.trim())
     .filter(Boolean)
 );
+const isCorsOriginAllowed = createCorsOriginValidator(allowedCorsOrigins);
 
 // 1. HTTP Security Headers (Helmet)
 app.use(
@@ -88,7 +90,7 @@ const authLimiter = rateLimit({
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedCorsOrigins.has(origin)) {
+      if (isCorsOriginAllowed(origin)) {
         return callback(null, true);
       }
       return callback(new AppError("Bu origin için CORS erişimine izin verilmiyor.", 403));

@@ -5,6 +5,7 @@ const {
   getCookieToken,
   isValidCsrfRequest,
 } = require("../utils/authCookies");
+const { getEffectivePermissions } = require("../services/permission.service");
 
 const accountQueries = {
   admin: `
@@ -96,6 +97,7 @@ async function authMiddleware(req, res, next) {
       ...decoded,
       ...account,
       role: decoded.role,
+      permissions: await getEffectivePermissions(decoded.role, account.id),
     };
     req.authSource = bearerToken ? "bearer" : "cookie";
 

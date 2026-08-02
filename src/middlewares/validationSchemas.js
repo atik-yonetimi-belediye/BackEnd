@@ -30,6 +30,9 @@ const SIRKET_ONAY_DURUMLARI = [
   "reddedildi",
   "pasif",
 ];
+const GOREV_DURUMLARI = ["atandi", "devam_ediyor", "tamamlandi", "atlandi", "iptal_edildi"];
+const GOREV_ONCELIKLERI = ["dusuk", "normal", "yuksek", "acil"];
+const PERSONEL_TURLERI = ["cavus", "sofor"];
 
 const emptyToUndefined = (value) =>
   value === "" || value === null ? undefined : value;
@@ -122,8 +125,13 @@ const konteyner = {
 };
 
 const personName = trimmedString(2, 50, "Ad").regex(
-  /^[a-zA-ZçÇğĞıİöÖşŞüÜ\s'-]+$/,
+  /^[\p{L}\s'-]+$/u,
   "Ad yalnızca harf, boşluk, kesme ve tire içerebilir."
+);
+
+const fullPersonName = trimmedString(2, 100, "Ad soyad").regex(
+  /^[\p{L}\s'-]+$/u,
+  "Ad soyad yalnızca harf, boşluk, kesme ve tire içerebilir."
 );
 
 const plate = trimmedString(5, 20, "Plaka")
@@ -142,6 +150,13 @@ const cavus = {
     latitude: z.coerce.number().min(-90).max(90),
     longitude: z.coerce.number().min(-180).max(180),
   }),
+  updateKonteyner: z.object({
+    tur: z.enum(ATIK_TURLERI).optional(),
+    latitude: z.coerce.number().min(-90).max(90).optional(),
+    longitude: z.coerce.number().min(-180).max(180).optional(),
+    adres: clearableString(1000),
+    yerlesim_notu: clearableString(2000),
+  }).refine((value) => Object.keys(value).length > 0, { message: "En az bir güncelleme alanı gönderilmelidir." }),
   createArac: z.object({
     plaka: plate,
     arac_turu: z.enum(ATIK_TURLERI),
@@ -161,7 +176,23 @@ const cavus = {
     sifre: password,
     arac_id: id,
   }),
+  updateSofor: z.object({ ad: personName.optional(), soyad: personName.optional(), telefon: phone.optional() })
+    .refine((value) => Object.keys(value).length > 0, { message: "En az bir güncelleme alanı gönderilmelidir." }),
   updateSoforArac: z.object({ arac_id: id }),
+  createKonteynerGorevi: z.object({
+    sofor_id: id,
+    oncelik: z.enum(GOREV_ONCELIKLERI).optional().default("normal"),
+    hedef_tarih: z.union([z.iso.datetime({ offset: true }), z.null()]).optional().default(null),
+    yonetici_notu: optionalString(2000),
+  }),
+  cancelKonteynerGorevi: z.object({ iptal_nedeni: optionalString(1000) }),
+  bulkKonteynerGorevi: z.object({
+    konteyner_ids: z.array(id).min(1).max(100).transform((items) => [...new Set(items)]),
+    sofor_id: id,
+    oncelik: z.enum(GOREV_ONCELIKLERI).optional().default("normal"),
+    hedef_tarih: z.union([z.iso.datetime({ offset: true }), z.null()]).optional().default(null),
+    yonetici_notu: optionalString(2000),
+  }),
   idParams,
   listQuery: paginationQuery,
 };
@@ -173,6 +204,9 @@ const sofor = {
       durum: z.enum(TOPLAMA_DURUMLARI),
       sebep: optionalString(255),
       diger_aciklama: optionalString(2000),
+      latitude: z.preprocess(emptyToUndefined, z.coerce.number().min(-90).max(90).optional()),
+      longitude: z.preprocess(emptyToUndefined, z.coerce.number().min(-180).max(180).optional()),
+      konum_dogruluk_metre: z.preprocess(emptyToUndefined, z.coerce.number().min(0).max(100000).optional()),
     })
     .superRefine((value, context) => {
       if (value.durum === "atlanildi" && !value.sebep) {
@@ -203,8 +237,20 @@ const sofor = {
           message: "Diğer sebebi için açıklama zorunludur.",
         });
       }
+      if ((value.latitude === undefined) !== (value.longitude === undefined)) {
+        context.addIssue({
+          code: "custom",
+          path: ["latitude"],
+          message: "Konum kaydı için enlem ve boylam birlikte gönderilmelidir.",
+        });
+      }
     }),
   listQuery: paginationQuery,
+  gorevListQuery: z.object({
+    durum: z.enum(GOREV_DURUMLARI).optional(),
+    ...paginationShape,
+  }),
+  gorevIdParams: idParams,
 };
 
 const sikayet = {
@@ -254,6 +300,7 @@ const sirket = {
   createTalep: requireTalepContent(z.object(sirketTalepFields)),
   updateTalep: z
     .object({
+      konteyner_id: z.union([id, z.null()]).optional(),
       talep_basligi: clearableString(150),
       talep_aciklamasi: clearableString(3000),
       tahmini_miktar: sirketTalepFields.tahmini_miktar,
@@ -282,6 +329,64 @@ const recycling = {
 };
 
 const admin = {
+  personelYetkiParams: z.object({ accountType: z.enum(PERSONEL_TURLERI), id }),
+  updatePersonelYetkileri: z.object({
+    permissions: z.array(z.object({
+      code: trimmedString(2, 100, "Yetki kodu"),
+      allowed: z.union([z.boolean(), z.null()]),
+    })).min(1).max(100),
+  }),
+  cavusListQuery: z.object({
+    search: optionalString(100),
+    aktif_mi: booleanQuery.optional(),
+    mahalle_id: id.optional(),
+    ...paginationShape,
+  }),
+  soforListQuery: z.object({
+    search: optionalString(100),
+    aktif_mi: booleanQuery.optional(),
+    cavus_id: id.optional(),
+    arac_id: id.optional(),
+    ...paginationShape,
+  }),
+  createCavus: z.object({
+    ad_soyad: fullPersonName,
+    telefon: phone,
+    sifre: password,
+    mahalle_id: id,
+    aktif_mi: z.boolean().optional().default(true),
+  }),
+  updateCavus: z
+    .object({
+      ad_soyad: fullPersonName.optional(),
+      telefon: phone.optional(),
+      mahalle_id: id.optional(),
+    })
+    .refine((value) => Object.keys(value).length > 0, {
+      message: "En az bir güncelleme alanı gönderilmelidir.",
+    }),
+  createSofor: z.object({
+    ad: personName,
+    soyad: personName,
+    telefon: phone,
+    sifre: password,
+    cavus_id: id,
+    arac_id: id,
+    aktif_mi: z.boolean().optional().default(true),
+  }),
+  updateSofor: z
+    .object({
+      ad: personName.optional(),
+      soyad: personName.optional(),
+      telefon: phone.optional(),
+      cavus_id: id.optional(),
+      arac_id: z.union([id, z.null()]).optional(),
+    })
+    .refine((value) => Object.keys(value).length > 0, {
+      message: "En az bir güncelleme alanı gönderilmelidir.",
+    }),
+  updatePersonelDurum: z.object({ aktif_mi: z.boolean() }),
+  resetPersonelPassword: z.object({ sifre: password }),
   sirketListQuery: z.object({
     onay_durumu: z.enum(SIRKET_ONAY_DURUMLARI).optional(),
     aktif_mi: booleanQuery.optional(),
@@ -292,10 +397,101 @@ const admin = {
   }),
   konteynerListQuery: konteyner.listQuery,
   aracListQuery: z.object({
+    search: optionalString(100),
     arac_turu: z.enum(ATIK_TURLERI).optional(),
     cavus_id: id.optional(),
     aktif_mi: booleanQuery.optional(),
+    atama_durumu: z.enum(["atanmis", "bosta"]).optional(),
     ...paginationShape,
+  }),
+  createArac: z.object({
+    plaka: plate,
+    arac_turu: z.enum(ATIK_TURLERI),
+    cavus_id: id,
+    aktif_mi: z.boolean().optional().default(true),
+  }),
+  updateArac: z
+    .object({
+      plaka: plate.optional(),
+      arac_turu: z.enum(ATIK_TURLERI).optional(),
+      cavus_id: id.optional(),
+    })
+    .refine((value) => Object.keys(value).length > 0, {
+      message: "En az bir güncelleme alanı gönderilmelidir.",
+    }),
+  updateAracDurum: z.object({ aktif_mi: z.boolean() }),
+  updateAracAtama: z.object({
+    cavus_id: id,
+    sofor_id: z.union([id, z.null()]).optional().default(null),
+  }),
+  gorevListQuery: z.object({
+    durum: z.enum(GOREV_DURUMLARI).optional(),
+    ...paginationShape,
+  }),
+  createKonteynerGorevi: z.object({
+    cavus_id: id,
+    sofor_id: id,
+    oncelik: z.enum(GOREV_ONCELIKLERI).optional().default("normal"),
+    hedef_tarih: z.union([z.iso.datetime({ offset: true }), z.null()]).optional().default(null),
+    yonetici_notu: optionalString(2000),
+    farkli_mahalle_onayi: z.boolean().optional().default(false),
+  }),
+  bulkKonteynerGorevi: z.object({
+    konteyner_ids: z.array(id).min(1).max(100).transform((items) => [...new Set(items)]),
+    cavus_id: id,
+    sofor_id: id,
+    oncelik: z.enum(GOREV_ONCELIKLERI).optional().default("normal"),
+    hedef_tarih: z.union([z.iso.datetime({ offset: true }), z.null()]).optional().default(null),
+    yonetici_notu: optionalString(2000),
+    farkli_mahalle_onayi: z.boolean().optional().default(false),
+  }),
+  createKonteyner: z.object({
+    konteyner_kodu: trimmedString(2, 50, "Konteyner kodu").transform((value) => value.toLocaleUpperCase("tr-TR")).optional(),
+    tur: z.enum(ATIK_TURLERI),
+    mahalle_id: id,
+    cavus_id: z.union([id, z.null()]).optional().default(null),
+    latitude: z.coerce.number().min(-90).max(90),
+    longitude: z.coerce.number().min(-180).max(180),
+    adres: optionalString(1000),
+    kapasite_litre: z.preprocess(emptyToUndefined, z.coerce.number().int().min(30).max(10000).optional()),
+    yerlesim_notu: optionalString(2000),
+    kurulum_tarihi: z.preprocess(emptyToUndefined, z.iso.date().optional()),
+    aktif_mi: z.boolean().optional().default(true),
+    yakin_konteyner_onayi: z.boolean().optional().default(false),
+  }),
+  updateKonteyner: z.object({
+    konteyner_kodu: trimmedString(2, 50, "Konteyner kodu").transform((value) => value.toLocaleUpperCase("tr-TR")).optional(),
+    tur: z.enum(ATIK_TURLERI).optional(),
+    mahalle_id: id.optional(),
+    cavus_id: z.union([id, z.null()]).optional(),
+    latitude: z.coerce.number().min(-90).max(90).optional(),
+    longitude: z.coerce.number().min(-180).max(180).optional(),
+    adres: clearableString(1000),
+    kapasite_litre: z.union([z.coerce.number().int().min(30).max(10000), z.null()]).optional(),
+    yerlesim_notu: clearableString(2000),
+    kurulum_tarihi: z.union([z.iso.date(), z.null()]).optional(),
+    farkli_mahalle_onayi: z.boolean().optional().default(false),
+  }).refine((value) => Object.keys(value).some((key) => key !== "farkli_mahalle_onayi"), {
+    message: "En az bir güncelleme alanı gönderilmelidir.",
+  }),
+  updateKonteynerDurum: z.object({ aktif_mi: z.boolean() }),
+  konteynerQrQuery: z.object({ target: z.url().max(2000).refine((value) => /^https?:\/\//i.test(value), "QR hedefi http veya https olmalıdır.") }),
+  updateKonteynerCavus: z.object({
+    cavus_id: id,
+    acik_gorevi_iptal_et: z.boolean().optional().default(false),
+    farkli_mahalle_onayi: z.boolean().optional().default(false),
+  }),
+  updateKonteynerGorevi: z
+    .object({
+      oncelik: z.enum(GOREV_ONCELIKLERI).optional(),
+      hedef_tarih: z.union([z.iso.datetime({ offset: true }), z.null()]).optional(),
+      yonetici_notu: clearableString(2000),
+    })
+    .refine((value) => Object.keys(value).length > 0, {
+      message: "En az bir güncelleme alanı gönderilmelidir.",
+    }),
+  cancelKonteynerGorevi: z.object({
+    iptal_nedeni: optionalString(1000),
   }),
   toplamaListQuery: z
     .object({
@@ -338,5 +534,7 @@ module.exports = {
     SIKAYET_KATEGORILERI,
     TALEP_DURUMLARI,
     SIRKET_ONAY_DURUMLARI,
+    GOREV_DURUMLARI,
+    GOREV_ONCELIKLERI,
   },
 };

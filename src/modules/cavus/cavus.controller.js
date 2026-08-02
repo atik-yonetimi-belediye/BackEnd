@@ -1,4 +1,5 @@
 const cavusService = require("./cavus.service");
+const containerTaskService = require("../admin/containerTask.service");
 const { successResponse, errorResponse } = require("../../utils/response");
 
 const allowedAtikTurleri = ["kati_atik", "geri_donusum"];
@@ -81,6 +82,14 @@ async function passiveKonteyner(req, res) {
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
   }
+}
+
+async function updateKonteyner(req, res) {
+  try {
+    const data = await cavusService.updateKonteyner(req.user.id, req.params.id, req.body);
+    if (!data) return errorResponse(res, "Konteyner bulunamadı.", 404);
+    return successResponse(res, "Konteyner güncellendi.", data);
+  } catch (error) { return errorResponse(res, error.message, error.statusCode || 500); }
 }
 
 async function getMyAraclar(req, res) {
@@ -198,6 +207,16 @@ async function passiveSofor(req, res) {
   }
 }
 
+async function updateSofor(req, res) {
+  try {
+    const data = await cavusService.updateSofor(req.user.id, req.params.id, req.body);
+    if (!data) return errorResponse(res, "Şoför bulunamadı.", 404);
+    return successResponse(res, "Şoför güncellendi.", data);
+  } catch (error) {
+    return errorResponse(res, error.code === "23505" ? "Telefon numarası kullanılıyor." : error.message, error.code === "23505" ? 409 : (error.statusCode || 500));
+  }
+}
+
 async function getMyToplamaKayitlari(req, res) {
   try {
     const data = await cavusService.getMyToplamaKayitlari(
@@ -234,10 +253,39 @@ async function updateSoforArac(req, res) {
   }
 }
 
+async function getEligibleDrivers(req, res) {
+  try { return successResponse(res, "Uygun şoförler listelendi.", await containerTaskService.getEligibleDrivers(req.params.id, req.user.id)); }
+  catch (error) { return errorResponse(res, error.message, error.statusCode || 500); }
+}
+
+async function createContainerTask(req, res) {
+  try {
+    const body = { ...req.body, cavus_id: req.user.id, farkli_mahalle_onayi: false };
+    const actor = { role: "cavus", id: req.user.id, name: req.user.ad_soyad || "Çavuş" };
+    return successResponse(res, "Görev şoföre atandı.", await containerTaskService.createContainerTask(actor, req.params.id, body), 201);
+  } catch (error) { return errorResponse(res, error.message, error.statusCode || 500); }
+}
+
+async function createBulkContainerTasks(req, res) {
+  try {
+    const body = { ...req.body, cavus_id: req.user.id, farkli_mahalle_onayi: false };
+    const actor = { role: "cavus", id: req.user.id, name: req.user.ad_soyad || "Çavuş" };
+    return successResponse(res, "Görevler şoföre atandı.", await containerTaskService.createBulkContainerTasks(actor, body.konteyner_ids, body), 201);
+  } catch (error) { return errorResponse(res, error.message, error.statusCode || 500); }
+}
+
+async function cancelContainerTask(req, res) {
+  try {
+    const actor = { role: "cavus", id: req.user.id, name: req.user.ad_soyad || "Çavuş" };
+    return successResponse(res, "Görev iptal edildi.", await containerTaskService.cancelTask(req.params.id, req.body.iptal_nedeni, actor, req.user.id));
+  } catch (error) { return errorResponse(res, error.message, error.statusCode || 500); }
+}
+
 module.exports = {
   getMe,
   getMyKonteynerler,
   createKonteyner,
+  updateKonteyner,
   passiveKonteyner,
   getMyAraclar,
   createArac,
@@ -245,7 +293,12 @@ module.exports = {
   passiveArac,
   getMySoforler,
   createSofor,
+  updateSofor,
   updateSoforArac,
   passiveSofor,
   getMyToplamaKayitlari,
+  getEligibleDrivers,
+  createContainerTask,
+  createBulkContainerTasks,
+  cancelContainerTask,
 };

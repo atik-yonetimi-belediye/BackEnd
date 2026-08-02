@@ -1,4 +1,5 @@
 const pool = require("../../config/db");
+const { recordActivity } = require("../../services/activity.service");
 const {
   getPagination,
   toPaginatedResult,
@@ -91,7 +92,8 @@ async function getAvailableKonteynerlerForSofor(soforId, pagination = {}) {
 }
 
 async function createToplamaKaydi(soforId, data) {
-  const { konteyner_id, durum, sebep, diger_aciklama, idempotency_key } = data;
+  const { konteyner_id, durum, sebep, diger_aciklama, idempotency_key,
+    latitude, longitude, konum_dogruluk_metre, kanit_fotografi_url } = data;
 
   const checkResult = await pool.query(
     `
@@ -156,10 +158,12 @@ async function createToplamaKaydi(soforId, data) {
 
   const result = await pool.query(
     `
+    WITH saved AS (
     INSERT INTO toplama_kayitlari
-      (konteyner_id, sofor_id, durum, sebep, diger_aciklama, idempotency_key)
+      (konteyner_id, sofor_id, durum, sebep, diger_aciklama, idempotency_key,
+       latitude, longitude, konum_dogruluk_metre, kanit_fotografi_url)
     VALUES
-      ($1, $2, $3, $4, $5, $6)
+      ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     ON CONFLICT (sofor_id, idempotency_key)
       WHERE idempotency_key IS NOT NULL
     DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
@@ -170,9 +174,23 @@ async function createToplamaKaydi(soforId, data) {
       durum,
       sebep,
       diger_aciklama,
+      latitude,
+      longitude,
+      konum_dogruluk_metre,
+      kanit_fotografi_url,
       tarih_saat,
       created_at,
       updated_at
+    ), task_update AS (
+      UPDATE konteyner_gorevleri
+         SET durum = CASE WHEN $3 = 'toplandi' THEN 'tamamlandi' ELSE 'atlandi' END,
+             tamamlanma_tarihi = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+       WHERE konteyner_id = $1 AND sofor_id = $2
+         AND durum IN ('atandi', 'devam_ediyor')
+       RETURNING id
+    )
+    SELECT * FROM saved
     `,
     [
       konteyner_id,
@@ -181,9 +199,20 @@ async function createToplamaKaydi(soforId, data) {
       durum === "atlanildi" ? sebep : null,
       durum === "atlanildi" ? diger_aciklama || null : null,
       idempotency_key || null,
+      latitude ?? null,
+      longitude ?? null,
+      konum_dogruluk_metre ?? null,
+      kanit_fotografi_url || null,
     ]
   );
-
+  const driver = await pool.query("SELECT CONCAT(ad, ' ', soyad) AS ad_soyad FROM soforler WHERE id=$1", [soforId]);
+  await recordActivity(pool, {
+    actorRole: "sofor", actorId: soforId, actorName: driver.rows[0]?.ad_soyad,
+    entityType: "toplama", entityId: result.rows[0].id,
+    action: durum === "toplandi" ? "collection.completed" : "collection.skipped",
+    summary: durum === "toplandi" ? "Konteyner toplandı." : "Konteyner atlandı.",
+    metadata: { related_entity_type: "konteyner", related_entity_id: Number(konteyner_id), photo: Boolean(kanit_fotografi_url), location: latitude != null },
+  });
   return result.rows[0];
 }
 
@@ -201,6 +230,10 @@ async function getMyToplamaKayitlari(soforId, pagination = {}) {
       tk.durum,
       tk.sebep,
       tk.diger_aciklama,
+      tk.latitude,
+      tk.longitude,
+      tk.konum_dogruluk_metre,
+      tk.kanit_fotografi_url,
       tk.tarih_saat,
       tk.created_at,
       tk.updated_at,
@@ -218,9 +251,65 @@ async function getMyToplamaKayitlari(soforId, pagination = {}) {
   return toPaginatedResult(result.rows, page, limit);
 }
 
+async function getMyTasks(soforId, filters = {}) {
+  const { page, limit, offset } = getPagination(filters);
+  const values = [soforId];
+  const conditions = ["g.sofor_id = $1"];
+  if (filters.durum) {
+    values.push(filters.durum);
+    conditions.push(`g.durum = $${values.length}`);
+  }
+  const result = await pool.query(
+    `SELECT g.id, g.konteyner_id, k.konteyner_kodu, k.tur,
+            k.latitude, k.longitude, m.ad AS mahalle_ad,
+            g.cavus_id, c.ad_soyad AS cavus_ad_soyad,
+            g.arac_id, a.plaka, g.oncelik, g.durum, g.hedef_tarih,
+            g.yonetici_notu, g.baslama_tarihi, g.tamamlanma_tarihi,
+            (g.hedef_tarih IS NOT NULL AND g.hedef_tarih < CURRENT_TIMESTAMP
+             AND g.durum IN ('atandi', 'devam_ediyor')) AS gecikti_mi,
+            g.created_at, g.updated_at, COUNT(*) OVER() AS total_count
+       FROM konteyner_gorevleri g
+       JOIN konteynerler k ON k.id = g.konteyner_id
+       JOIN mahalleler m ON m.id = k.mahalle_id
+       JOIN cavuslar c ON c.id = g.cavus_id
+       JOIN araclar a ON a.id = g.arac_id
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY CASE g.oncelik WHEN 'acil' THEN 1 WHEN 'yuksek' THEN 2 WHEN 'normal' THEN 3 ELSE 4 END,
+               g.hedef_tarih NULLS LAST, g.created_at ASC
+      LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+    [...values, limit, offset]
+  );
+  return toPaginatedResult(result.rows, page, limit);
+}
+
+async function startTask(soforId, taskId) {
+  const result = await pool.query(
+    `UPDATE konteyner_gorevleri
+        SET durum = 'devam_ediyor', baslama_tarihi = COALESCE(baslama_tarihi, CURRENT_TIMESTAMP),
+            updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND sofor_id = $2 AND durum = 'atandi'
+      RETURNING id, konteyner_id, durum, baslama_tarihi, updated_at`,
+    [taskId, soforId]
+  );
+  if (result.rowCount === 0) {
+    const error = new Error("Başlatılabilir görev bulunamadı.");
+    error.statusCode = 404;
+    throw error;
+  }
+  const driver = await pool.query("SELECT CONCAT(ad, ' ', soyad) AS ad_soyad FROM soforler WHERE id=$1", [soforId]);
+  await recordActivity(pool, {
+    actorRole: "sofor", actorId: soforId, actorName: driver.rows[0]?.ad_soyad,
+    entityType: "gorev", entityId: Number(taskId), action: "task.started", summary: "Şoför görevi başlattı.",
+    metadata: { related_entity_type: "konteyner", related_entity_id: result.rows[0].konteyner_id },
+  });
+  return result.rows[0];
+}
+
 module.exports = {
   getMe,
   getAvailableKonteynerlerForSofor,
   createToplamaKaydi,
   getMyToplamaKayitlari,
+  getMyTasks,
+  startTask,
 };

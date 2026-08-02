@@ -1,0 +1,11 @@
+const service = require("./containerManagement.service");
+const { successResponse, errorResponse } = require("../../utils/response");
+const handle = (work) => async (req, res) => { try { return await work(req, res); } catch (error) { return errorResponse(res, error.message, error.statusCode || 500, error.errors); } };
+const actor = (req) => ({ id: req.user.id, ad_soyad: req.user.ad_soyad || req.user.kullanici_adi || "Yönetici" });
+const createContainer = handle(async (req, res) => successResponse(res, "Konteyner oluşturuldu.", await service.createContainer(actor(req), req.body), 201));
+const updateContainer = handle(async (req, res) => successResponse(res, "Konteyner güncellendi.", await service.updateContainer(actor(req), req.params.id, req.body)));
+const updateContainerStatus = handle(async (req, res) => successResponse(res, "Konteyner durumu güncellendi.", await service.updateContainerStatus(actor(req), req.params.id, req.body.aktif_mi)));
+const getContainerDetail = handle(async (req, res) => successResponse(res, "Konteyner detayı getirildi.", await service.getContainerDetail(req.params.id)));
+const deleteContainer = handle(async (req, res) => successResponse(res, "Konteyner kalıcı olarak silindi.", await service.deleteContainer(actor(req), req.params.id)));
+const createContainerQr = handle(async (req, res) => successResponse(res, "Konteyner QR kodu oluşturuldu.", await service.createContainerQr(req.params.id, req.query.target)));
+module.exports = { createContainer, updateContainer, updateContainerStatus, getContainerDetail, deleteContainer, createContainerQr };

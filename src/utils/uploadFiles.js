@@ -4,8 +4,10 @@ const AppError = require("./AppError");
 
 const uploadsRoot = path.resolve(__dirname, "..", "..", "uploads");
 const sikayetUploadDir = path.join(uploadsRoot, "sikayetler");
+const toplamaUploadDir = path.join(uploadsRoot, "toplama");
 
 fs.mkdirSync(sikayetUploadDir, { recursive: true });
+fs.mkdirSync(toplamaUploadDir, { recursive: true });
 
 function isWithinDirectory(filePath, directory) {
   const relative = path.relative(directory, path.resolve(filePath));
@@ -27,16 +29,13 @@ async function cleanupUploadedFiles(files = []) {
 }
 
 function photoUrlToFilePath(photoUrl) {
-  if (
-    typeof photoUrl !== "string" ||
-    !photoUrl.startsWith("/uploads/sikayetler/")
-  ) {
-    return null;
-  }
-
+  if (typeof photoUrl !== "string" || !photoUrl.startsWith("/uploads/")) return null;
+  const directory = photoUrl.startsWith("/uploads/toplama/") ? toplamaUploadDir :
+    photoUrl.startsWith("/uploads/sikayetler/") ? sikayetUploadDir : null;
+  if (!directory) return null;
   const filename = path.basename(photoUrl);
-  const filePath = path.join(sikayetUploadDir, filename);
-  return isWithinDirectory(filePath, sikayetUploadDir) ? filePath : null;
+  const filePath = path.join(directory, filename);
+  return isWithinDirectory(filePath, directory) ? filePath : null;
 }
 
 async function deleteStoredPhotoUrls(photoUrls = []) {
@@ -81,7 +80,7 @@ function detectImageType(buffer) {
 }
 
 async function validateUploadedImageSignatures(req, res, next) {
-  const files = req.files || [];
+  const files = [...(Array.isArray(req.files) ? req.files : []), ...(req.file ? [req.file] : [])];
 
   try {
     for (const file of files) {
@@ -110,6 +109,7 @@ async function validateUploadedImageSignatures(req, res, next) {
 
 module.exports = {
   sikayetUploadDir,
+  toplamaUploadDir,
   cleanupUploadedFiles,
   deleteStoredPhotoUrls,
   validateUploadedImageSignatures,

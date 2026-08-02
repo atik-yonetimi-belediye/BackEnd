@@ -5,6 +5,32 @@ const {
   toPaginatedResult,
 } = require("../../utils/pagination");
 
+async function assertActiveRecyclingContainer(queryable, konteynerId) {
+  const result = await queryable.query(
+    `
+    SELECT id, tur, aktif_mi
+    FROM konteynerler
+    WHERE id = $1
+    `,
+    [konteynerId]
+  );
+
+  if (result.rows.length === 0) {
+    throw new AppError("Konteyner bulunamadı.", 404);
+  }
+
+  const konteyner = result.rows[0];
+  if (!konteyner.aktif_mi) {
+    throw new AppError("Pasif konteyner için talep oluşturulamaz.", 400);
+  }
+  if (konteyner.tur !== "geri_donusum") {
+    throw new AppError(
+      "Geri dönüşüm talebi sadece geri dönüşüm konteyneri için oluşturulabilir.",
+      400
+    );
+  }
+}
+
 async function getMe(sirketId) {
   const result = await pool.query(
     `
@@ -66,36 +92,7 @@ async function createGeriDonusumTalebi(sirketId, data) {
   }
 
   if (konteyner_id) {
-    const konteynerResult = await pool.query(
-      `
-      SELECT id, tur, aktif_mi
-      FROM konteynerler
-      WHERE id = $1
-      `,
-      [konteyner_id]
-    );
-
-    if (konteynerResult.rows.length === 0) {
-      const error = new Error("Konteyner bulunamadı.");
-      error.statusCode = 404;
-      throw error;
-    }
-
-    const konteyner = konteynerResult.rows[0];
-
-    if (!konteyner.aktif_mi) {
-      const error = new Error("Pasif konteyner için talep oluşturulamaz.");
-      error.statusCode = 400;
-      throw error;
-    }
-
-    if (konteyner.tur !== "geri_donusum") {
-      const error = new Error(
-        "Geri dönüşüm talebi sadece geri dönüşüm konteyneri için oluşturulabilir."
-      );
-      error.statusCode = 400;
-      throw error;
-    }
+    await assertActiveRecyclingContainer(pool, konteyner_id);
   }
 
   const result = await pool.query(
@@ -158,6 +155,8 @@ async function getMyGeriDonusumTalepleri(sirketId, pagination = {}) {
       gdt.sirket_id,
       gdt.konteyner_id,
       k.konteyner_kodu,
+      k.latitude,
+      k.longitude,
       m.ad AS mahalle_ad,
       gdt.gonderen_tipi,
       gdt.gonderen_ad,
@@ -188,6 +187,7 @@ async function getMyGeriDonusumTalepleri(sirketId, pagination = {}) {
 
 async function updateGeriDonusumTalebi(sirketId, talepId, data) {
   const allowedFields = [
+    "konteyner_id",
     "talep_basligi",
     "talep_aciklamasi",
     "tahmini_miktar",
@@ -202,6 +202,12 @@ async function updateGeriDonusumTalebi(sirketId, talepId, data) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    if (
+      Object.prototype.hasOwnProperty.call(data, "konteyner_id")
+      && data.konteyner_id !== null
+    ) {
+      await assertActiveRecyclingContainer(client, data.konteyner_id);
+    }
     const currentResult = await client.query(
       `
       SELECT talep_basligi, talep_aciklamasi

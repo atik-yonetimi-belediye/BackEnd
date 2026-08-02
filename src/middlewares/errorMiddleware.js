@@ -8,7 +8,7 @@ async function errorMiddleware(err, req, res, next) {
   }
 
   if (req.files?.length && !req.uploadsPersisted) {
-    await cleanupUploadedFiles(req.files);
+    await cleanupUploadedFiles([...(Array.isArray(req.files) ? req.files : []), ...(req.file ? [req.file] : [])]);
   }
 
   let statusCode = err.statusCode || err.status || 500;

@@ -49,6 +49,96 @@ async function getAllSoforler(req, res) {
   }
 }
 
+async function createCavus(req, res) {
+  try {
+    const data = await adminService.createCavus(req.body);
+    return successResponse(res, "Çavuş oluşturuldu.", data, 201);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500, error.errors);
+  }
+}
+
+async function updateCavus(req, res) {
+  try {
+    const data = await adminService.updateCavus(req.params.id, req.body);
+    return successResponse(res, "Çavuş bilgileri güncellendi.", data);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500, error.errors);
+  }
+}
+
+async function updateCavusDurum(req, res) {
+  try {
+    const data = await adminService.updateCavusDurum(req.params.id, req.body.aktif_mi);
+    return successResponse(res, "Çavuş durumu güncellendi.", data);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500, error.errors);
+  }
+}
+
+async function resetCavusPassword(req, res) {
+  try {
+    const data = await adminService.resetCavusPassword(req.params.id, req.body.sifre);
+    return successResponse(res, "Çavuş şifresi yenilendi.", data);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500, error.errors);
+  }
+}
+
+async function deleteCavus(req, res) {
+  try {
+    const data = await adminService.deleteCavus(req.params.id);
+    return successResponse(res, "Çavuş kalıcı olarak silindi.", data);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500, error.errors);
+  }
+}
+
+async function createSofor(req, res) {
+  try {
+    const data = await adminService.createSofor(req.body);
+    return successResponse(res, "Şoför oluşturuldu.", data, 201);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500, error.errors);
+  }
+}
+
+async function updateSofor(req, res) {
+  try {
+    const data = await adminService.updateSofor(req.params.id, req.body);
+    return successResponse(res, "Şoför bilgileri güncellendi.", data);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500, error.errors);
+  }
+}
+
+async function updateSoforDurum(req, res) {
+  try {
+    const data = await adminService.updateSoforDurum(req.params.id, req.body.aktif_mi);
+    return successResponse(res, "Şoför durumu güncellendi.", data);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500, error.errors);
+  }
+}
+
+async function resetSoforPassword(req, res) {
+  try {
+    const data = await adminService.resetSoforPassword(req.params.id, req.body.sifre);
+    return successResponse(res, "Şoför şifresi yenilendi.", data);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500, error.errors);
+  }
+}
+
+async function deleteSofor(req, res) {
+  try {
+    const data = await adminService.deleteSofor(req.params.id);
+    return successResponse(res, "Şoför kalıcı olarak silindi.", data);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500, error.errors);
+  }
+}
+
 async function getAllSirketler(req, res) {
   try {
     const { onay_durumu, aktif_mi } = req.query;
@@ -140,7 +230,7 @@ async function getAllKonteynerler(req, res) {
 
 async function getAllAraclar(req, res) {
   try {
-    const { arac_turu, cavus_id, aktif_mi } = req.query;
+    const { search, arac_turu, cavus_id, aktif_mi, atama_durumu } = req.query;
 
     if (arac_turu && !allowedAtikTurleri.includes(arac_turu)) {
       return errorResponse(res, "Geçersiz araç türü.", 400);
@@ -149,6 +239,8 @@ async function getAllAraclar(req, res) {
     const filters = {};
     filters.page = req.query.page;
     filters.limit = req.query.limit;
+    filters.search = search;
+    filters.atama_durumu = atama_durumu;
 
     if (arac_turu) {
       filters.arac_turu = arac_turu;
@@ -168,6 +260,51 @@ async function getAllAraclar(req, res) {
     return successResponse(res, "Araçlar listelendi.", data);
   } catch (error) {
     return errorResponse(res, error.message, error.statusCode || 500);
+  }
+}
+
+async function createArac(req, res) {
+  try {
+    const data = await adminService.createArac(req.body);
+    return successResponse(res, "Araç oluşturuldu.", data, 201);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500, error.errors);
+  }
+}
+
+async function updateArac(req, res) {
+  try {
+    const data = await adminService.updateArac(req.params.id, req.body);
+    return successResponse(res, "Araç bilgileri güncellendi.", data);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500, error.errors);
+  }
+}
+
+async function updateAracDurum(req, res) {
+  try {
+    const data = await adminService.updateAracDurum(req.params.id, req.body.aktif_mi);
+    return successResponse(res, "Araç durumu güncellendi.", data);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500, error.errors);
+  }
+}
+
+async function updateAracAtama(req, res) {
+  try {
+    const data = await adminService.updateAracAtama(req.params.id, req.body);
+    return successResponse(res, "Araç ataması güncellendi.", data);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500, error.errors);
+  }
+}
+
+async function deleteArac(req, res) {
+  try {
+    const data = await adminService.deleteArac(req.params.id);
+    return successResponse(res, "Araç kalıcı olarak silindi.", data);
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500, error.errors);
   }
 }
 
@@ -220,9 +357,24 @@ module.exports = {
   getDashboard,
   getAllCavuslar,
   getAllSoforler,
+  createCavus,
+  updateCavus,
+  updateCavusDurum,
+  resetCavusPassword,
+  deleteCavus,
+  createSofor,
+  updateSofor,
+  updateSoforDurum,
+  resetSoforPassword,
+  deleteSofor,
   getAllSirketler,
   updateSirketOnayDurumu,
   getAllKonteynerler,
   getAllAraclar,
+  createArac,
+  updateArac,
+  updateAracDurum,
+  updateAracAtama,
+  deleteArac,
   getAllToplamaKayitlari,
 };

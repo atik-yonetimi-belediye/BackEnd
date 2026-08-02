@@ -130,6 +130,163 @@ paths:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Limit'
       responses: { '200': { $ref: '#/components/responses/Paginated' } }
+  /admin/cavuslar:
+    post:
+      summary: Yeni çavuş oluşturur
+      x-required-role: admin
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateCavus' } } } }
+      responses: { '201': { description: Çavuş oluşturuldu }, '409': { description: Telefon veya mahalle çakışması } }
+  /admin/cavuslar/{id}:
+    patch:
+      summary: Çavuş bilgilerini günceller
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateCavus' } } } }
+      responses: { '200': { description: Çavuş güncellendi }, '409': { description: Atama veya benzersiz alan çakışması } }
+    delete:
+      summary: Bağlantısı olmayan pasif çavuşu kalıcı siler
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses: { '200': { description: Çavuş silindi }, '409': { description: Aktif veya ilişkili kayıtları var } }
+  /admin/cavuslar/{id}/durum:
+    patch:
+      summary: Çavuşu etkinleştirir veya pasife alır
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PersonnelStatus' } } } }
+      responses: { '200': { description: Durum güncellendi } }
+  /admin/cavuslar/{id}/sifre:
+    patch:
+      summary: Çavuş şifresini yeniler
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ResetPassword' } } } }
+      responses: { '200': { description: Şifre yenilendi } }
+  /admin/soforler:
+    post:
+      summary: Yeni şoför oluşturur ve araca atar
+      x-required-role: admin
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateSofor' } } } }
+      responses: { '201': { description: Şoför oluşturuldu }, '409': { description: Telefon veya araç çakışması } }
+  /admin/soforler/{id}:
+    patch:
+      summary: Şoför bilgilerini ve atamasını günceller
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateSofor' } } } }
+      responses: { '200': { description: Şoför güncellendi }, '409': { description: Atama veya benzersiz alan çakışması } }
+    delete:
+      summary: Geçmiş kaydı olmayan pasif şoförü kalıcı siler
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses: { '200': { description: Şoför silindi }, '409': { description: Aktif veya geçmiş kaydı var } }
+  /admin/soforler/{id}/durum:
+    patch:
+      summary: Şoförü etkinleştirir veya pasife alır
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PersonnelStatus' } } } }
+      responses: { '200': { description: Durum güncellendi } }
+  /admin/soforler/{id}/sifre:
+    patch:
+      summary: Şoför şifresini yeniler
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ResetPassword' } } } }
+      responses: { '200': { description: Şifre yenilendi } }
+  /admin/araclar:
+    get:
+      summary: Araçları sahip, şoför ve durum bilgileriyle listeler
+      x-required-role: admin
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: arac_turu, in: query, schema: { type: string, enum: [kati_atik, geri_donusum] } }
+        - { name: cavus_id, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: aktif_mi, in: query, schema: { type: boolean } }
+        - { name: atama_durumu, in: query, schema: { type: string, enum: [atanmis, bosta] } }
+      responses: { '200': { $ref: '#/components/responses/Paginated' } }
+    post:
+      summary: Yeni araç oluşturur
+      x-required-role: admin
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateArac' } } } }
+      responses: { '201': { description: Araç oluşturuldu }, '409': { description: Plaka veya aktif çavuş kuralı çakışması } }
+  /admin/araclar/{id}:
+    patch:
+      summary: Aracı düzenler; çavuş değişirse bağlı şoförü de atomik olarak taşır
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateArac' } } } }
+      responses: { '200': { description: Araç güncellendi }, '409': { description: Atama veya benzersiz alan çakışması } }
+    delete:
+      summary: Bağlantısı olmayan pasif aracı kalıcı siler
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses: { '200': { description: Araç silindi }, '409': { description: Araç aktif veya şoföre bağlı } }
+  /admin/araclar/{id}/durum:
+    patch:
+      summary: Aracı etkinleştirir veya pasife alır
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/VehicleStatus' } } } }
+      responses: { '200': { description: Durum güncellendi } }
+  /admin/araclar/{id}/atama:
+    patch:
+      summary: Araç, çavuş ve şoför atamasını atomik olarak günceller
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/VehicleAssignment' } } } }
+      responses: { '200': { description: Atama güncellendi }, '409': { description: Araç veya şoför başka bir atamayla çakışıyor } }
+  /admin/konteynerler/{id}/gorevler:
+    get:
+      summary: Konteynerin görev geçmişini listeler
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }, { $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/Limit' }, { name: durum, in: query, schema: { type: string, enum: [atandi, devam_ediyor, tamamlandi, atlandi, iptal_edildi] } }]
+      responses: { '200': { $ref: '#/components/responses/Paginated' } }
+    post:
+      summary: Konteynere doğrulanmış görev atar
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateContainerTask' } } } }
+      responses: { '201': { description: Görev oluşturuldu }, '409': { description: Açık görev veya atama kuralı çakışması } }
+  /admin/konteynerler/{id}/uygun-soforler:
+    get:
+      summary: Uygun şoförleri araç ve iş yükü bilgileriyle listeler
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses: { '200': { description: Şoför uygunluk listesi } }
+  /admin/konteynerler/{id}/cavus:
+    patch:
+      summary: Konteynerin sorumlu çavuşunu güvenli biçimde değiştirir
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateContainerCavus' } } } }
+      responses: { '200': { description: Sorumlu güncellendi }, '409': { description: Açık görev veya mahalle onayı gerekiyor } }
+  /admin/konteyner-gorevleri/{id}:
+    patch:
+      summary: Açık görevin öncelik, hedef tarih veya notunu günceller
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateContainerTask' } } } }
+      responses: { '200': { description: Görev güncellendi }, '409': { description: Kapalı görev düzenlenemez } }
+  /admin/konteyner-gorevleri/{id}/iptal:
+    patch:
+      summary: Açık konteyner görevini iptal eder
+      x-required-role: admin
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { iptal_nedeni: { type: string, maxLength: 500 } } } } } }
+      responses: { '200': { description: Görev iptal edildi }, '404': { description: Açık görev bulunamadı } }
+  /sofor/gorevler:
+    get:
+      summary: Oturumdaki şoförün görevlerini öncelik sırasıyla listeler
+      x-required-role: sofor
+      parameters: [{ $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/Limit' }, { name: durum, in: query, schema: { type: string, enum: [atandi, devam_ediyor, tamamlandi, atlandi, iptal_edildi] } }]
+      responses: { '200': { $ref: '#/components/responses/Paginated' } }
+  /sofor/gorevler/{id}/baslat:
+    patch:
+      summary: Oturumdaki şoförün atanmış görevini başlatır
+      x-required-role: sofor
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses: { '200': { description: Görev başlatıldı }, '404': { description: Başlatılabilir görev bulunamadı } }
   /sirket/geri-donusum-talepleri:
     get:
       summary: Şirketin talepleri
@@ -140,8 +297,21 @@ paths:
       x-required-role: sirket
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, properties: { talep_basligi: { type: string }, talep_aciklamasi: { type: string }, tahmini_miktar: { type: number, exclusiveMinimum: 0 }, adres: { type: string } } } } }
+        content: { application/json: { schema: { type: object, properties: { konteyner_id: { type: [integer, "null"], minimum: 1 }, talep_basligi: { type: string }, talep_aciklamasi: { type: string }, tahmini_miktar: { type: number, exclusiveMinimum: 0 }, adres: { type: string } } } } }
       responses: { '201': { description: Talep oluşturuldu } }
+  /sirket/geri-donusum-talepleri/{id}:
+    put:
+      summary: Bekleyen geri dönüşüm talebini günceller
+      x-required-role: sirket
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { konteyner_id: { type: [integer, "null"], minimum: 1 }, talep_basligi: { type: [string, "null"] }, talep_aciklamasi: { type: [string, "null"] }, tahmini_miktar: { type: number, exclusiveMinimum: 0 }, adres: { type: [string, "null"] } } } } }
+      responses: { '200': { description: Talep güncellendi }, '400': { $ref: '#/components/responses/BadRequest' } }
 components:
   securitySchemes:
     cookieAuth: { type: apiKey, in: cookie, name: auth_token }
@@ -162,6 +332,61 @@ components:
       type: object
       required: [konteyner_id, durum]
       properties: { konteyner_id: { type: integer, minimum: 1 }, durum: { type: string, enum: [toplandi, atlanildi] }, sebep: { type: string }, diger_aciklama: { type: string } }
+    CreateCavus:
+      type: object
+      required: [ad_soyad, telefon, sifre, mahalle_id]
+      properties: { ad_soyad: { type: string, minLength: 2, maxLength: 100 }, telefon: { type: string }, sifre: { type: string, format: password, minLength: 8 }, mahalle_id: { type: integer, minimum: 1 }, aktif_mi: { type: boolean, default: true } }
+    UpdateCavus:
+      type: object
+      minProperties: 1
+      properties: { ad_soyad: { type: string, minLength: 2, maxLength: 100 }, telefon: { type: string }, mahalle_id: { type: integer, minimum: 1 } }
+    CreateSofor:
+      type: object
+      required: [ad, soyad, telefon, sifre, cavus_id, arac_id]
+      properties: { ad: { type: string, minLength: 2, maxLength: 50 }, soyad: { type: string, minLength: 2, maxLength: 50 }, telefon: { type: string }, sifre: { type: string, format: password, minLength: 8 }, cavus_id: { type: integer, minimum: 1 }, arac_id: { type: integer, minimum: 1 }, aktif_mi: { type: boolean, default: true } }
+    UpdateSofor:
+      type: object
+      minProperties: 1
+      properties: { ad: { type: string, minLength: 2, maxLength: 50 }, soyad: { type: string, minLength: 2, maxLength: 50 }, telefon: { type: string }, cavus_id: { type: integer, minimum: 1 }, arac_id: { type: [integer, "null"], minimum: 1 } }
+    PersonnelStatus:
+      type: object
+      required: [aktif_mi]
+      properties: { aktif_mi: { type: boolean } }
+    ResetPassword:
+      type: object
+      required: [sifre]
+      properties: { sifre: { type: string, format: password, minLength: 8, maxLength: 128 } }
+    CreateArac:
+      type: object
+      required: [plaka, arac_turu, cavus_id]
+      properties: { plaka: { type: string, example: '46 ABC 123' }, arac_turu: { type: string, enum: [kati_atik, geri_donusum] }, cavus_id: { type: integer, minimum: 1 }, aktif_mi: { type: boolean, default: true } }
+    UpdateArac:
+      type: object
+      minProperties: 1
+      properties: { plaka: { type: string, example: '46 ABC 123' }, arac_turu: { type: string, enum: [kati_atik, geri_donusum] }, cavus_id: { type: integer, minimum: 1 } }
+    VehicleStatus:
+      type: object
+      required: [aktif_mi]
+      properties: { aktif_mi: { type: boolean } }
+    VehicleAssignment:
+      type: object
+      required: [cavus_id]
+      properties: { cavus_id: { type: integer, minimum: 1 }, sofor_id: { type: [integer, "null"], minimum: 1 } }
+    CreateContainerTask:
+      type: object
+      additionalProperties: false
+      required: [cavus_id, sofor_id]
+      properties: { cavus_id: { type: integer, minimum: 1 }, sofor_id: { type: integer, minimum: 1 }, oncelik: { type: string, enum: [dusuk, normal, yuksek, acil], default: normal }, hedef_tarih: { type: [string, "null"], format: date-time }, yonetici_notu: { type: [string, "null"], maxLength: 1000 }, farkli_mahalle_onayi: { type: boolean, default: false } }
+    UpdateContainerTask:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties: { oncelik: { type: string, enum: [dusuk, normal, yuksek, acil] }, hedef_tarih: { type: [string, "null"], format: date-time }, yonetici_notu: { type: [string, "null"], maxLength: 1000 } }
+    UpdateContainerCavus:
+      type: object
+      additionalProperties: false
+      required: [cavus_id]
+      properties: { cavus_id: { type: integer, minimum: 1 }, farkli_mahalle_onayi: { type: boolean, default: false }, acik_gorevi_iptal_et: { type: boolean, default: false } }
   responses:
     Paginated: { description: Sayfalı başarılı yanıt }
     BadRequest: { description: Geçersiz istek }

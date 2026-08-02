@@ -2,6 +2,7 @@ const bcrypt = require("bcrypt");
 const pool = require("../../config/db");
 const { generateToken } = require("../../utils/jwt");
 const { normalizePhone } = require("../../utils/phone");
+const { getEffectivePermissions } = require("../../services/permission.service");
 
 const DUMMY_PASSWORD_HASH =
   "$2b$12$c2WZvTqKV8d58y7XeV/8BOo8n9Zd6XDg.tfyHpEQ4ANZduJ/hDt3y";
@@ -147,9 +148,11 @@ async function login(identifier, sifre) {
     throw createAuthError();
   }
 
+  const user = createUser(candidate.role, account);
+  user.permissions = await getEffectivePermissions(candidate.role, account.id);
   return {
     token: generateToken({ id: account.id, role: candidate.role }),
-    user: createUser(candidate.role, account),
+    user,
   };
 }
 

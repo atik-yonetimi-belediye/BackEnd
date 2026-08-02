@@ -3,6 +3,7 @@ const pool = require("../../config/db");
 const crypto = require("crypto");
 const { normalizePhone } = require("../../utils/phone");
 const AppError = require("../../utils/AppError");
+const { recordActivity } = require("../../services/activity.service");
 const {
   getPagination,
   toPaginatedResult,
@@ -113,6 +114,16 @@ async function passiveKonteyner(cavusId, konteynerId) {
     [konteynerId, cavusId]
   );
 
+  return result.rows[0];
+}
+
+async function updateKonteyner(cavusId, konteynerId, data) {
+  const allowed = ["tur", "latitude", "longitude", "adres", "yerlesim_notu"];
+  const values = []; const fields = [];
+  for (const field of allowed) if (data[field] !== undefined) { values.push(data[field]); fields.push(`${field}=$${values.length}`); }
+  values.push(konteynerId, cavusId);
+  const result = await pool.query(`UPDATE konteynerler SET ${fields.join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=$${values.length - 1} AND cavus_id=$${values.length} RETURNING *`, values);
+  if (result.rowCount) await recordActivity(pool, { actorRole: "cavus", actorId: cavusId, actorName: "Çavuş", entityType: "konteyner", entityId: Number(konteynerId), action: "container.updated", summary: `${result.rows[0].konteyner_kodu} çavuş tarafından güncellendi.`, metadata: { changed_fields: allowed.filter((field) => data[field] !== undefined) } });
   return result.rows[0];
 }
 
@@ -397,10 +408,21 @@ async function updateSoforArac(cavusId, soforId, aracId) {
   }
 }
 
+async function updateSofor(cavusId, soforId, data) {
+  const allowed = ["ad", "soyad", "telefon"];
+  const values = []; const fields = [];
+  for (const field of allowed) if (data[field] !== undefined) { values.push(field === "telefon" ? normalizePhone(data[field]) : data[field]); fields.push(`${field}=$${values.length}`); }
+  values.push(soforId, cavusId);
+  const result = await pool.query(`UPDATE soforler SET ${fields.join(",")}, updated_at=CURRENT_TIMESTAMP WHERE id=$${values.length - 1} AND cavus_id=$${values.length} RETURNING id,ad,soyad,telefon,arac_id,cavus_id,aktif_mi,updated_at`, values);
+  if (result.rowCount) await recordActivity(pool, { actorRole: "cavus", actorId: cavusId, actorName: "Çavuş", entityType: "sofor", entityId: Number(soforId), action: "driver.updated", summary: "Şoför bilgileri çavuş tarafından güncellendi.", metadata: { changed_fields: allowed.filter((field) => data[field] !== undefined) } });
+  return result.rows[0];
+}
+
 module.exports = {
   getMe,
   getMyKonteynerler,
   createKonteyner,
+  updateKonteyner,
   passiveKonteyner,
   getMyAraclar,
   createArac,
@@ -408,6 +430,7 @@ module.exports = {
   passiveArac,
   getMySoforler,
   createSofor,
+  updateSofor,
   updateSoforArac,
   passiveSofor,
   getMyToplamaKayitlari,

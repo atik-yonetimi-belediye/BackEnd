@@ -1,5 +1,6 @@
 const soforService = require("./sofor.service");
 const { successResponse, errorResponse } = require("../../utils/response");
+const { cleanupUploadedFiles } = require("../../utils/uploadFiles");
 
 const allowedDurumlar = ["toplandi", "atlanildi"];
 
@@ -36,10 +37,11 @@ async function getAvailableKonteynerlerForSofor(req, res) {
 
 async function createToplamaKaydi(req, res) {
   try {
-    const { konteyner_id, durum, sebep, diger_aciklama } = req.body;
+    const { konteyner_id, durum, sebep, diger_aciklama, latitude, longitude, konum_dogruluk_metre } = req.body;
     const idempotencyKey = req.get("Idempotency-Key") || null;
 
     if (idempotencyKey && !/^[A-Za-z0-9-]{20,64}$/.test(idempotencyKey)) {
+      if (req.file) await cleanupUploadedFiles([req.file]);
       return errorResponse(res, "Geçersiz tekrar gönderim anahtarı.", 400);
     }
 
@@ -72,11 +74,16 @@ async function createToplamaKaydi(req, res) {
       durum,
       sebep,
       diger_aciklama,
+      latitude,
+      longitude,
+      konum_dogruluk_metre,
+      kanit_fotografi_url: req.file ? `/uploads/toplama/${req.file.filename}` : null,
       idempotency_key: idempotencyKey,
     });
 
     return successResponse(res, "Toplama kaydı başarıyla oluşturuldu.", data, 201);
   } catch (error) {
+    if (req.file) await cleanupUploadedFiles([req.file]);
     return errorResponse(res, error.message, error.statusCode || 500);
   }
 }
@@ -94,9 +101,28 @@ async function getMyToplamaKayitlari(req, res) {
   }
 }
 
+async function getMyTasks(req, res) {
+  try {
+    return successResponse(res, "Şoför görevleri listelendi.", await soforService.getMyTasks(req.user.id, req.query));
+  } catch (error) {
+    if (req.file) await cleanupUploadedFiles([req.file]);
+    return errorResponse(res, error.message, error.statusCode || 500);
+  }
+}
+
+async function startTask(req, res) {
+  try {
+    return successResponse(res, "Görev başlatıldı.", await soforService.startTask(req.user.id, req.params.id));
+  } catch (error) {
+    return errorResponse(res, error.message, error.statusCode || 500);
+  }
+}
+
 module.exports = {
   getMe,
   getAvailableKonteynerlerForSofor,
   createToplamaKaydi,
   getMyToplamaKayitlari,
+  getMyTasks,
+  startTask,
 };

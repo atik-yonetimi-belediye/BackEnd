@@ -1,6 +1,6 @@
 const multer = require("multer");
 const crypto = require("crypto");
-const { sikayetUploadDir } = require("../utils/uploadFiles");
+const { sikayetUploadDir, toplamaUploadDir } = require("../utils/uploadFiles");
 const AppError = require("../utils/AppError");
 
 const extensionsByMime = {
@@ -17,6 +17,14 @@ const storage = multer.diskStorage({
   filename: function (req, file, cb) {
     const extension = extensionsByMime[file.mimetype];
     cb(null, `sikayet-${crypto.randomUUID()}${extension}`);
+  },
+});
+
+const toplamaStorage = multer.diskStorage({
+  destination: function (req, file, cb) { cb(null, toplamaUploadDir); },
+  filename: function (req, file, cb) {
+    const extension = extensionsByMime[file.mimetype];
+    cb(null, `toplama-${crypto.randomUUID()}${extension}`);
   },
 });
 
@@ -45,6 +53,13 @@ const uploadSikayetFotograflari = multer({
   },
 });
 
+const uploadToplamaKaniti = multer({
+  storage: toplamaStorage,
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 12 },
+});
+
 module.exports = {
   uploadSikayetFotograflari,
+  uploadToplamaKaniti,
 };

@@ -47,6 +47,12 @@ let externalCavusId;
 let externalVehicleId;
 let externalContainerId;
 let testCollectionId;
+let adminPersonnelCavusId;
+let adminPersonnelSoforId;
+let adminPersonnelVehicleId;
+let adminVehicleTestIds = { mahalle: [], cavus: [], sofor: null, arac: null };
+let containerTaskTestId;
+let seededDriverOriginalState;
 
 function readCsrfCookie(response) {
   const cookie = response.headers["set-cookie"]?.find((value) =>
@@ -58,9 +64,48 @@ function readCsrfCookie(response) {
 
 test.before(async () => {
   await runMigrations();
+  const seededDriver = await pool.query(
+    "SELECT id, cavus_id, arac_id, aktif_mi FROM soforler WHERE telefon = $1",
+    ["05053334455"]
+  );
+  assert.equal(seededDriver.rowCount, 1, "Entegrasyon şoför hesabı bulunmalıdır.");
+  seededDriverOriginalState = seededDriver.rows[0];
+  const compatibleVehicle = await pool.query(
+    `SELECT a.id
+       FROM araclar a
+      WHERE a.cavus_id = $1 AND a.arac_turu = 'kati_atik' AND a.aktif_mi = true
+      ORDER BY a.id LIMIT 1`,
+    [seededDriverOriginalState.cavus_id]
+  );
+  assert.equal(compatibleVehicle.rowCount, 1, "Entegrasyon şoförü için aktif katı atık aracı bulunmalıdır.");
+  await pool.query(
+    "UPDATE soforler SET aktif_mi = true, arac_id = $1 WHERE id = $2",
+    [compatibleVehicle.rows[0].id, seededDriverOriginalState.id]
+  );
 });
 
 test.after(async () => {
+  if (containerTaskTestId) await pool.query("DELETE FROM konteyner_gorevleri WHERE id = $1", [containerTaskTestId]);
+  if (seededDriverOriginalState) {
+    await pool.query(
+      "UPDATE soforler SET cavus_id = $1, arac_id = $2, aktif_mi = $3 WHERE id = $4",
+      [seededDriverOriginalState.cavus_id, seededDriverOriginalState.arac_id,
+        seededDriverOriginalState.aktif_mi, seededDriverOriginalState.id]
+    );
+  }
+  if (adminVehicleTestIds.sofor) await pool.query("DELETE FROM soforler WHERE id = $1", [adminVehicleTestIds.sofor]);
+  if (adminVehicleTestIds.arac) await pool.query("DELETE FROM araclar WHERE id = $1", [adminVehicleTestIds.arac]);
+  for (const id of adminVehicleTestIds.cavus) await pool.query("DELETE FROM cavuslar WHERE id = $1", [id]);
+  for (const id of adminVehicleTestIds.mahalle) await pool.query("DELETE FROM mahalleler WHERE id = $1", [id]);
+  if (adminPersonnelSoforId) {
+    await pool.query("DELETE FROM soforler WHERE id = $1", [adminPersonnelSoforId]);
+  }
+  if (adminPersonnelVehicleId) {
+    await pool.query("DELETE FROM araclar WHERE id = $1", [adminPersonnelVehicleId]);
+  }
+  if (adminPersonnelCavusId) {
+    await pool.query("DELETE FROM cavuslar WHERE id = $1", [adminPersonnelCavusId]);
+  }
   if (testComplaintId) {
     await pool.query(
       "DELETE FROM sikayet_fotograflari WHERE sikayet_id = $1",
@@ -93,6 +138,73 @@ test.after(async () => {
   await pool.end();
 });
 
+test("yönetici aktif aracı şoförüyle başka aktif çavuşa aktarır ve güvenli siler", async () => {
+  const adminLogin = await adminAgent
+    .post("/api/auth/login")
+    .send({ identifier: "denizk", sifre: "admin123" })
+    .expect(200);
+  adminCsrf = readCsrfCookie(adminLogin);
+  const mahalle = await pool.query(
+    "INSERT INTO mahalleler (ad) VALUES ($1), ($2) RETURNING id",
+    [`Araç Test A ${Date.now()}`, `Araç Test B ${Date.now()}`]
+  );
+  adminVehicleTestIds.mahalle = mahalle.rows.map((item) => item.id);
+  const cavus = await pool.query(
+    `INSERT INTO cavuslar (ad_soyad, telefon, sifre, mahalle_id, aktif_mi)
+     VALUES ('Araç Test Çavuş A', '05050000981', 'test-hash', $1, true),
+            ('Araç Test Çavuş B', '05050000982', 'test-hash', $2, true)
+     RETURNING id`,
+    adminVehicleTestIds.mahalle
+  );
+  adminVehicleTestIds.cavus = cavus.rows.map((item) => item.id);
+
+  const created = await adminAgent
+    .post("/api/admin/araclar")
+    .set("X-CSRF-Token", adminCsrf)
+    .send({ plaka: "46 INT 981", arac_turu: "kati_atik", cavus_id: adminVehicleTestIds.cavus[0] })
+    .expect(201);
+  adminVehicleTestIds.arac = created.body.data.id;
+  assert.equal(created.body.data.cavus_id, adminVehicleTestIds.cavus[0]);
+
+  const driver = await adminAgent
+    .post("/api/admin/soforler")
+    .set("X-CSRF-Token", adminCsrf)
+    .send({ ad: "Araç", soyad: "Şoförü", telefon: "05050000983", sifre: "GucluTest123", cavus_id: adminVehicleTestIds.cavus[0], arac_id: adminVehicleTestIds.arac })
+    .expect(201);
+  adminVehicleTestIds.sofor = driver.body.data.id;
+
+  const transferred = await adminAgent
+    .patch(`/api/admin/araclar/${adminVehicleTestIds.arac}`)
+    .set("X-CSRF-Token", adminCsrf)
+    .send({ cavus_id: adminVehicleTestIds.cavus[1] })
+    .expect(200);
+  assert.equal(transferred.body.data.cavus_id, adminVehicleTestIds.cavus[1]);
+  assert.equal(transferred.body.data.sofor_id, adminVehicleTestIds.sofor);
+  assert.equal(transferred.body.data.tasinan_sofor_sayisi, 1);
+  const movedDriver = await pool.query("SELECT cavus_id FROM soforler WHERE id = $1", [adminVehicleTestIds.sofor]);
+  assert.equal(movedDriver.rows[0].cavus_id, adminVehicleTestIds.cavus[1]);
+
+  await adminAgent
+    .delete(`/api/admin/araclar/${adminVehicleTestIds.arac}`)
+    .set("X-CSRF-Token", adminCsrf)
+    .expect(409);
+  const passive = await adminAgent
+    .patch(`/api/admin/araclar/${adminVehicleTestIds.arac}/durum`)
+    .set("X-CSRF-Token", adminCsrf)
+    .send({ aktif_mi: false })
+    .expect(200);
+  assert.equal(passive.body.data.aktif_mi, false);
+  assert.equal(passive.body.data.sofor_id, null);
+
+  await adminAgent
+    .delete(`/api/admin/araclar/${adminVehicleTestIds.arac}`)
+    .set("X-CSRF-Token", adminCsrf)
+    .expect(200);
+  adminVehicleTestIds.arac = null;
+  await pool.query("DELETE FROM soforler WHERE id = $1", [adminVehicleTestIds.sofor]);
+  adminVehicleTestIds.sofor = null;
+});
+
 test("sağlık, CORS ve bilinmeyen route davranışları doğrudur", async () => {
   const health = await request(app).get("/health").set("X-Request-ID", "integration-request-0001").expect(200);
   assert.equal(health.body.success, true);
@@ -110,6 +222,16 @@ test("sağlık, CORS ve bilinmeyen route davranışları doğrudur", async () =>
     .set("Origin", "https://attacker.example")
     .expect(403);
   assert.equal(forbiddenCors.body.success, false);
+
+  const lanCors = await request(app)
+    .options("/api/auth/login")
+    .set("Origin", "http://192.168.1.108:5180")
+    .set("Access-Control-Request-Method", "POST")
+    .expect(204);
+  assert.equal(
+    lanCors.headers["access-control-allow-origin"],
+    "http://192.168.1.108:5180"
+  );
 
   await request(app).get("/bilinmeyen-route").expect(404);
 });
@@ -167,6 +289,219 @@ test("tüm kullanıcı rolleri giriş yapabilir ve rol sınırı uygulanır", as
   await cavusAgent.get("/api/admin/dashboard").expect(403);
   const session = await adminAgent.get("/api/auth/session").expect(200);
   assert.equal(session.body.data.user.role, "admin");
+});
+
+test("yönetici şoför yetkisini kapatıp varsayılana döndürebilir", async () => {
+  const driverId = seededDriverOriginalState.id;
+  const catalog = await adminAgent
+    .get(`/api/admin/personel/sofor/${driverId}/yetkiler`)
+    .expect(200);
+  assert.ok(catalog.body.data.some((item) => item.code === "own_history.view"));
+  const initialVersion = Number(catalog.body.data[0].permission_version);
+
+  const changedCatalog = await adminAgent
+    .put(`/api/admin/personel/sofor/${driverId}/yetkiler`)
+    .set("X-CSRF-Token", adminCsrf)
+    .send({ permissions: [{ code: "own_history.view", allowed: false }] })
+    .expect(200);
+  assert.ok(Number(changedCatalog.body.data[0].permission_version) > initialVersion);
+  await soforAgent.get("/api/sofor/toplama-kayitlari").expect(403);
+
+  await adminAgent
+    .delete(`/api/admin/personel/sofor/${driverId}/yetkiler`)
+    .set("X-CSRF-Token", adminCsrf)
+    .expect(200);
+  await soforAgent.get("/api/sofor/toplama-kayitlari").expect(200);
+});
+
+test("konteyner detayı sağlık, şikâyet, saha kaydı ve işlem geçmişi döndürür", async () => {
+  const list = await adminAgent.get("/api/admin/konteynerler?limit=1").expect(200);
+  const container = list.body.data[0];
+  assert.ok(["yesil", "sari", "kirmizi"].includes(container.saglik_durumu));
+  const detail = await adminAgent.get(`/api/admin/konteynerler/${container.id}/detay`).expect(200);
+  assert.ok(Array.isArray(detail.body.data.sikayetler));
+  assert.ok(Array.isArray(detail.body.data.toplama_kayitlari));
+  assert.ok(Array.isArray(detail.body.data.islem_gecmisi));
+});
+
+test("yönetici pasif konteyner oluşturur, QR üretir ve bağlantısız kaydı güvenli siler", async () => {
+  const district = await pool.query("SELECT id FROM mahalleler ORDER BY id LIMIT 1");
+  const code = `KNT-IT-${Date.now()}`;
+  const created = await adminAgent.post("/api/admin/konteynerler").set("X-CSRF-Token", adminCsrf).send({
+    konteyner_kodu: code, tur: "kati_atik", mahalle_id: district.rows[0].id,
+    latitude: 0.1234567, longitude: 0.1234567, aktif_mi: false,
+  }).expect(201);
+  const id = created.body.data.id;
+  const qr = await adminAgent.get(`/api/admin/konteynerler/${id}/qr`).query({ target: `http://localhost:5180/admin/harita?konteyner=${id}` }).expect(200);
+  assert.match(qr.body.data.svg, /<svg/);
+  await adminAgent.delete(`/api/admin/konteynerler/${id}`).set("X-CSRF-Token", adminCsrf).expect(200);
+});
+
+test("konteyner görevi güvenli atanır, çift atama engellenir ve şoför başlatabilir", async () => {
+  const fixture = await pool.query(
+    `SELECT s.id AS sofor_id, s.cavus_id, k.id AS konteyner_id
+       FROM soforler s
+       JOIN araclar a ON a.id = s.arac_id AND a.aktif_mi = true
+       JOIN konteynerler k ON k.cavus_id = s.cavus_id AND k.tur = a.arac_turu AND k.aktif_mi = true
+      WHERE s.telefon = '05053334455' AND s.aktif_mi = true
+      ORDER BY k.id LIMIT 1`
+  );
+  assert.equal(fixture.rowCount, 1, "Görev testi için uyumlu şoför ve konteyner bulunmalıdır.");
+  const target = fixture.rows[0];
+
+  const eligible = await adminAgent
+    .get(`/api/admin/konteynerler/${target.konteyner_id}/uygun-soforler`)
+    .expect(200);
+  const eligibleDriver = eligible.body.data.soforler.find((item) => item.id === target.sofor_id);
+  assert.equal(eligibleDriver.uygun_mi, true);
+
+  const concurrentRequests = ["yuksek", "normal"].map((oncelik) => adminAgent
+    .post(`/api/admin/konteynerler/${target.konteyner_id}/gorevler`)
+    .set("X-CSRF-Token", adminCsrf)
+    .send({ cavus_id: target.cavus_id, sofor_id: target.sofor_id, oncelik, yonetici_notu: "Eş zamanlı entegrasyon görevi" }));
+  const concurrentResults = await Promise.all(concurrentRequests);
+  assert.deepEqual(concurrentResults.map((item) => item.status).sort(), [201, 409], "Eş zamanlı iki atamadan yalnızca biri başarılı olmalıdır.");
+  const created = concurrentResults.find((item) => item.status === 201);
+  containerTaskTestId = created.body.data.id;
+  assert.equal(created.body.data.durum, "atandi");
+  assert.equal(created.body.data.sofor_id, target.sofor_id);
+
+  const myTasks = await soforAgent.get("/api/sofor/gorevler").expect(200);
+  assert.ok(myTasks.body.data.some((item) => item.id === containerTaskTestId));
+  const started = await soforAgent
+    .patch(`/api/sofor/gorevler/${containerTaskTestId}/baslat`)
+    .set("X-CSRF-Token", soforCsrf)
+    .expect(200);
+  assert.equal(started.body.data.durum, "devam_ediyor");
+
+  const cancelled = await adminAgent
+    .patch(`/api/admin/konteyner-gorevleri/${containerTaskTestId}/iptal`)
+    .set("X-CSRF-Token", adminCsrf)
+    .send({ iptal_nedeni: "Entegrasyon testi tamamlandı." })
+    .expect(200);
+  assert.equal(cancelled.body.data.durum, "iptal_edildi");
+});
+
+test("yönetici personel yaşam döngüsünü ve güvenli silme kurallarını yönetir", async () => {
+  await cavusAgent
+    .post("/api/admin/cavuslar")
+    .set("X-CSRF-Token", cavusCsrf)
+    .send({})
+    .expect(403);
+
+  const mahalle = await pool.query(`
+    SELECT m.id
+    FROM mahalleler m
+    LEFT JOIN cavuslar c ON c.mahalle_id = m.id
+    WHERE c.id IS NULL
+    ORDER BY m.id
+    LIMIT 1
+  `);
+  assert.equal(mahalle.rowCount, 1, "Test için boş mahalle bulunmalıdır.");
+
+  const createdCavus = await adminAgent
+    .post("/api/admin/cavuslar")
+    .set("X-CSRF-Token", adminCsrf)
+    .send({
+      ad_soyad: "Entegrasyon Personel",
+      telefon: "05050000131",
+      sifre: "GucluTest123",
+      mahalle_id: mahalle.rows[0].id,
+    })
+    .expect(201);
+  adminPersonnelCavusId = createdCavus.body.data.id;
+  assert.equal(createdCavus.body.data.mahalle_id, mahalle.rows[0].id);
+  assert.equal("sifre" in createdCavus.body.data, false);
+
+  await adminAgent
+    .post("/api/admin/cavuslar")
+    .set("X-CSRF-Token", adminCsrf)
+    .send({
+      ad_soyad: "Telefon Çakışması",
+      telefon: "05050000131",
+      sifre: "GucluTest123",
+      mahalle_id: mahalle.rows[0].id,
+    })
+    .expect(409);
+
+  const vehicle = await pool.query(
+    `INSERT INTO araclar (plaka, arac_turu, cavus_id, aktif_mi)
+     VALUES ('46 INT 131', 'kati_atik', $1, true) RETURNING id`,
+    [adminPersonnelCavusId]
+  );
+  adminPersonnelVehicleId = vehicle.rows[0].id;
+
+  const createdSofor = await adminAgent
+    .post("/api/admin/soforler")
+    .set("X-CSRF-Token", adminCsrf)
+    .send({
+      ad: "Test",
+      soyad: "Şoförü",
+      telefon: "05050000132",
+      sifre: "GucluTest123",
+      cavus_id: adminPersonnelCavusId,
+      arac_id: adminPersonnelVehicleId,
+    })
+    .expect(201);
+  adminPersonnelSoforId = createdSofor.body.data.id;
+  assert.equal(createdSofor.body.data.cavus_id, adminPersonnelCavusId);
+  assert.equal(createdSofor.body.data.arac_id, adminPersonnelVehicleId);
+
+  const filtered = await adminAgent
+    .get("/api/admin/soforler?search=Test&aktif_mi=true")
+    .expect(200);
+  assert.ok(filtered.body.data.some((item) => item.id === adminPersonnelSoforId));
+
+  const updatedSofor = await adminAgent
+    .patch(`/api/admin/soforler/${adminPersonnelSoforId}`)
+    .set("X-CSRF-Token", adminCsrf)
+    .send({ ad: "Güncellenen" })
+    .expect(200);
+  assert.equal(updatedSofor.body.data.ad, "Güncellenen");
+
+  const resetPassword = await adminAgent
+    .patch(`/api/admin/soforler/${adminPersonnelSoforId}/sifre`)
+    .set("X-CSRF-Token", adminCsrf)
+    .send({ sifre: "YeniGuclu123" })
+    .expect(200);
+  assert.equal("sifre" in resetPassword.body.data, false);
+
+  await adminAgent
+    .delete(`/api/admin/soforler/${adminPersonnelSoforId}`)
+    .set("X-CSRF-Token", adminCsrf)
+    .expect(409);
+
+  const passiveSofor = await adminAgent
+    .patch(`/api/admin/soforler/${adminPersonnelSoforId}/durum`)
+    .set("X-CSRF-Token", adminCsrf)
+    .send({ aktif_mi: false })
+    .expect(200);
+  assert.equal(passiveSofor.body.data.aktif_mi, false);
+  assert.equal(passiveSofor.body.data.arac_id, null);
+
+  await adminAgent
+    .delete(`/api/admin/soforler/${adminPersonnelSoforId}`)
+    .set("X-CSRF-Token", adminCsrf)
+    .expect(200);
+  adminPersonnelSoforId = undefined;
+
+  await adminAgent
+    .patch(`/api/admin/cavuslar/${adminPersonnelCavusId}/durum`)
+    .set("X-CSRF-Token", adminCsrf)
+    .send({ aktif_mi: false })
+    .expect(200);
+  await adminAgent
+    .delete(`/api/admin/cavuslar/${adminPersonnelCavusId}`)
+    .set("X-CSRF-Token", adminCsrf)
+    .expect(409);
+
+  await pool.query("DELETE FROM araclar WHERE id = $1", [adminPersonnelVehicleId]);
+  adminPersonnelVehicleId = undefined;
+  await adminAgent
+    .delete(`/api/admin/cavuslar/${adminPersonnelCavusId}`)
+    .set("X-CSRF-Token", adminCsrf)
+    .expect(200);
+  adminPersonnelCavusId = undefined;
 });
 
 test("rol bazlı tüm okuma endpointleri geçerli SQL ve tutarlı yanıt üretir", async () => {
@@ -360,6 +695,13 @@ test("cookie oturumunda yazma işlemleri CSRF başlığı olmadan reddedilir", a
 });
 
 test("şirket talebi içerik bütünlüğünü ve durum yaşam döngüsünü korur", async () => {
+  const recyclingContainer = await pool.query(
+    "SELECT id FROM konteynerler WHERE aktif_mi = true AND tur = 'geri_donusum' ORDER BY id LIMIT 1"
+  );
+  const solidWasteContainer = await pool.query(
+    "SELECT id FROM konteynerler WHERE aktif_mi = true AND tur = 'kati_atik' ORDER BY id LIMIT 1"
+  );
+
   const created = await sirketAgent
     .post("/api/sirket/geri-donusum-talepleri")
     .set("X-CSRF-Token", sirketCsrf)
@@ -368,9 +710,24 @@ test("şirket talebi içerik bütünlüğünü ve durum yaşam döngüsünü kor
       talep_aciklamasi: "Test tamamlandığında temizlenecek kayıt.",
       tahmini_miktar: 25,
       adres: "Test adresi",
+      konteyner_id: recyclingContainer.rows[0].id,
     })
     .expect(201);
   testRecyclingId = created.body.data.id;
+  assert.equal(created.body.data.konteyner_id, recyclingContainer.rows[0].id);
+
+  await sirketAgent
+    .put(`/api/sirket/geri-donusum-talepleri/${testRecyclingId}`)
+    .set("X-CSRF-Token", sirketCsrf)
+    .send({ konteyner_id: solidWasteContainer.rows[0].id })
+    .expect(400);
+
+  const clearedContainer = await sirketAgent
+    .put(`/api/sirket/geri-donusum-talepleri/${testRecyclingId}`)
+    .set("X-CSRF-Token", sirketCsrf)
+    .send({ konteyner_id: null })
+    .expect(200);
+  assert.equal(clearedContainer.body.data.konteyner_id, null);
 
   await sirketAgent
     .put(`/api/sirket/geri-donusum-talepleri/${testRecyclingId}`)
@@ -560,6 +917,12 @@ test("yönetici yazma işlemleri değiştirilemez audit kaydı üretir", async (
   const audit = await pool.query("SELECT id, request_id FROM audit_logs WHERE actor_role = 'admin' ORDER BY id DESC LIMIT 1");
   assert.ok(audit.rowCount > 0);
   assert.ok(audit.rows[0].request_id);
+
+  const passwordAudit = await pool.query(
+    "SELECT request_data FROM audit_logs WHERE entity_path LIKE '/api/admin/%/sifre' ORDER BY id DESC LIMIT 1"
+  );
+  assert.equal(passwordAudit.rowCount, 1);
+  assert.deepEqual(passwordAudit.rows[0].request_data, {});
 
   const client = await pool.connect();
   try {
