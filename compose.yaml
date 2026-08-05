@@ -1,0 +1,50 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: belediye_atik
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - atik_local_postgres:/var/lib/postgresql/data
+      - ../Database/belediye-AtikYonetimi-veritabani.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d belediye_atik"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build: .
+    command: sh -c "node src/scripts/migrateDatabase.js && node src/server.js"
+    environment:
+      PORT: 5001
+      NODE_ENV: development
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: belediye_atik
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      JWT_SECRET: local-development-only-secret-change-before-production
+      JWT_EXPIRES_IN: 1d
+      CORS_ORIGINS: http://localhost:8081
+      TRUST_PROXY_HOPS: 1
+      TZ: Europe/Istanbul
+    ports:
+      - "5002:5001"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ../FrontEnd
+    ports:
+      - "8081:80"
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  atik_local_postgres:
