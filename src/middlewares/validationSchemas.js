@@ -65,7 +65,7 @@ const phone = z
   .transform(normalizePhone)
   .refine(
     (value) => /^0\d{10}$/.test(value),
-    "Telefon 0 ile başlayan 11 haneli bir numara olmalıdır."
+    "Telefon 543 ile veya başında 0 olacak şekilde 11 haneli girilmelidir."
   );
 
 const email = z
@@ -134,12 +134,10 @@ const fullPersonName = trimmedString(2, 100, "Ad soyad").regex(
   "Ad soyad yalnızca harf, boşluk, kesme ve tire içerebilir."
 );
 
-const plate = trimmedString(5, 20, "Plaka")
-  .transform((value) => value.toLocaleUpperCase("tr-TR"))
-  .refine(
-    (value) => /^\d{2}\s[A-ZÇĞİÖŞÜ]{1,4}\s\d{2,4}$/.test(value),
-    "Plaka '46 ABC 123' biçiminde olmalıdır."
-  );
+const plate = z
+  .string({ error: "Plaka metin olmalıdır." })
+  .transform((value) => value.replace(/\s+/g, "").toLocaleUpperCase("tr-TR"))
+  .pipe(z.string().min(1, "Plaka boş olamaz.").max(20, "Plaka en fazla 20 karakter olabilir."));
 
 const cavus = {
   createKonteyner: z.object({

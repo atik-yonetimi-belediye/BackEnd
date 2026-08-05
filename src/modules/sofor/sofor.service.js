@@ -73,12 +73,20 @@ async function getAvailableKonteynerlerForSofor(soforId, pagination = {}) {
       k.latitude,
       k.longitude,
       k.aktif_mi,
+      latest_collection.tarih_saat AS son_toplanma_tarihi,
       k.created_at,
       k.updated_at,
       COUNT(*) OVER() AS total_count
     FROM konteynerler k
     JOIN mahalleler m ON m.id = k.mahalle_id
     LEFT JOIN cavuslar c ON c.id = k.cavus_id
+    LEFT JOIN LATERAL (
+      SELECT tarih_saat
+      FROM toplama_kayitlari
+      WHERE konteyner_id = k.id AND durum = 'toplandi'
+      ORDER BY tarih_saat DESC
+      LIMIT 1
+    ) latest_collection ON true
     WHERE k.tur = $1
       AND k.cavus_id = $2
       AND k.aktif_mi = true

@@ -1,24 +1,13 @@
 function normalizePhone(phone) {
   if (!phone) return phone;
 
-  let cleaned = String(phone).trim();
+  let cleaned = String(phone).replace(/\D/g, "");
 
-  cleaned = cleaned.replace(/\s+/g, "");
-  cleaned = cleaned.replace(/-/g, "");
-  cleaned = cleaned.replace(/\(/g, "");
-  cleaned = cleaned.replace(/\)/g, "");
+  if (cleaned.startsWith("0090")) cleaned = cleaned.slice(4);
+  else if (cleaned.startsWith("90") && cleaned.length === 12) cleaned = cleaned.slice(2);
 
-  if (cleaned.startsWith("+90")) {
-    cleaned = "0" + cleaned.slice(3);
-  }
-
-  if (cleaned.startsWith("90") && cleaned.length === 12) {
-    cleaned = "0" + cleaned.slice(2);
-  }
-
-  if (cleaned.length === 10 && cleaned.startsWith("5")) {
-    cleaned = "0" + cleaned;
-  }
+  // Kullanıcı 543... veya 0543... girebilir; veritabanında tek biçim kullanılır.
+  if (cleaned.length === 10 && cleaned.startsWith("5")) cleaned = `0${cleaned}`;
 
   return cleaned;
 }

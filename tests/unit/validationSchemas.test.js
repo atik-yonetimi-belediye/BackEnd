@@ -25,14 +25,14 @@ test("şirket kaydı verilerini normalize eder", () => {
     ad: "  Örnek Geri Dönüşüm  ",
     adres: "",
     mail: "  BILGI@EXAMPLE.COM ",
-    telefon: "+90 505 222 33 44",
+    telefon: "+90 543 222 33 44",
     sifre: "gucluSifre123",
   });
 
   assert.equal(result.ad, "Örnek Geri Dönüşüm");
   assert.equal(result.adres, undefined);
   assert.equal(result.mail, "bilgi@example.com");
-  assert.equal(result.telefon, "05052223344");
+  assert.equal(result.telefon, "05432223344");
 });
 
 test("zayıf parola, geçersiz telefon ve sınır dışı sayfalama reddedilir", () => {
@@ -112,7 +112,7 @@ test("yönetici personel oluşturma ve güncelleme alanları sıkı doğrulanır
   assert.equal(
     schemas.admin.createCavus.safeParse({
       ad_soyad: "Ayşe Yılmaz",
-      telefon: "0505 111 22 33",
+      telefon: "0543 111 22 33",
       sifre: "GucluSifre123",
       mahalle_id: 2,
     }).success,
@@ -122,7 +122,7 @@ test("yönetici personel oluşturma ve güncelleme alanları sıkı doğrulanır
     schemas.admin.createSofor.safeParse({
       ad: "Mehmet",
       soyad: "Kaya",
-      telefon: "0505 111 22 34",
+      telefon: "0543 111 22 34",
       sifre: "GucluSifre123",
       cavus_id: 2,
       arac_id: 3,
@@ -143,11 +143,11 @@ test("yönetici araç oluşturma, aktarma ve filtre alanları doğrulanır", () 
     arac_turu: "kati_atik",
     cavus_id: 2,
   }).success, true);
-  assert.equal(schemas.admin.createArac.safeParse({
-    plaka: "geçersiz",
+  assert.equal(schemas.admin.createArac.parse({
+    plaka: "  geçersiz format  ",
     arac_turu: "kati_atik",
     cavus_id: 2,
-  }).success, false);
+  }).plaka, "GEÇERSİZFORMAT");
   assert.equal(schemas.admin.updateAracAtama.safeParse({ cavus_id: 3, sofor_id: null }).success, true);
   assert.equal(schemas.admin.updateAracAtama.safeParse({ cavus_id: 3, sofor_id: 0 }).success, false);
   assert.equal(schemas.admin.aracListQuery.safeParse({ atama_durumu: "bosta" }).success, true);
