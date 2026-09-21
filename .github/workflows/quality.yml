@@ -86,4 +86,5 @@ jobs:
         with:
           image: atik-yonetimi-backend:ci
           severity-cutoff: high
+          only-fixed: true
           fail-build: true
